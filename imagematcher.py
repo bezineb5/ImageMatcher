@@ -3,21 +3,21 @@ import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
 from mongoengine import *
-from werkzeug.utils import secure_filename
+import math
+from metadata_extraction import extract_metadata
 
 app = Flask(__name__)
 app.debug = True
 
 MIN_MATCH_COUNT = 5
-MAX_IMAGE_SIZE = 1024
+MAX_IMAGE_SIZE = 512
 
 class ReferenceImage(Document):
-    name = StringField(required=True)
-    coordinates = GeoPointField()
-    keypoints = ListField(ListField())
-    descriptors = ListField(ListField(FloatField()))
+    keypoints = ListField(ListField(), required=True)
+    descriptors = ListField(ListField(FloatField()), required=True)
     width = IntField(required=True)
     height = IntField(required=True)
+    metadata = DynamicField()
 
     def to_opencv_description(self):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
@@ -43,12 +43,11 @@ def init_database():
     return MongoEngine(app)
 
 def load_db_in_memory():
-    #for o in ReferenceImage.objects:
-    #    o.delete()
     return [o.to_opencv_description() for o in ReferenceImage.objects]
 
 def open_image(file):
     # convert the data to an array for decoding
+    file.seek(0)
     img_array = np.asarray(bytearray(file.read()), dtype=np.uint8)
     img = cv2.imdecode(img_array, 0)
 
@@ -66,24 +65,36 @@ def open_image(file):
 
     return img_resized
 
+
 def import_image(file):
-    name = secure_filename(file.filename)
     img = open_image(file)
     w, h = img.shape
 
+    metadata = extract_metadata(file)
+
     # find the keypoints and descriptors with SIFT
     kp, des = detector.detectAndCompute(img, None)
-    converted_kp = [ [p.pt[0], p.pt[1], p.size] for p in kp]
-    refImage = ReferenceImage(name=name, coordinates=None, keypoints=converted_kp, descriptors=des, width=w, height=h).save()
 
+    # Store the description of the image in the DB
+    converted_kp = [ [p.pt[0], p.pt[1], p.size] for p in kp]
+    refImage = ReferenceImage(keypoints=converted_kp, descriptors=des, width=w, height=h, metadata=metadata).save()
+
+    # Keep the important bits in memory
     ocv_ref_image = [kp, des, refImage.id, w, h]
     ref_database.append(ocv_ref_image)
 
-def score_transformation(mat, h_img, w_img, h_ref, w_ref):
+def transform_ref_image(mat, w_ref, h_ref):
     pts = np.float32([ [0,0],[0,h_ref-1],[w_ref-1,h_ref-1],[w_ref-1,0] ]).reshape(-1,1,2)
     dst_np = cv2.perspectiveTransform(pts, mat)
-    dst = [o[0].tolist() for o in dst_np]
+    return [o[0].tolist() for o in dst_np]
 
+def scale(points, w, h):
+    scale_point = lambda pt: [pt[0]/w, pt[1]/h]
+    return map(scale_point, points)
+
+def score_transformation(mat, w_ref, h_ref):
+    # Transform reference image into image space
+    dst = transform_ref_image(mat, w_ref, h_ref)
     print dst
 
     # Compute vectors
@@ -97,24 +108,29 @@ def score_transformation(mat, h_img, w_img, h_ref, w_ref):
     cur_sign = pdts[0]
     for pdt in pdts:
         if cur_sign*pdt <= 0.0:
-            return 0.0
+            return 0.0, 0.0
 
     # compute the area of the transformed reference image in the source image
     area = (abs(pdts[0]) + abs(pdts[2])) / 2.0
 
     # evaluate perspective
-    vec_len = lambda v: v[0]*v[0] + v[1]*v[1]
-    per_1 = vec_len(lines[0])/vec_len(lines[2])
-    per_2 = vec_len(lines[1])/vec_len(lines[3])
+    vec_len = lambda v: math.sqrt(v[0]*v[0] + v[1]*v[1])
+    vec_lengths = map(vec_len, lines)
+    per_1 = vec_lengths[0]/vec_lengths[2]
+    per_2 = vec_lengths[1]/vec_lengths[3]
     if per_1 > 1.0:
         per_1 = 1.0/per_1
     if per_2 > 1.0:
         per_2 = 1.0/per_2
 
     if per_1 < 0.5 or per_2 < 0.5:
-        return 0.0
+        return 0.0, 0.0
 
-    return area
+    # score the transformation: it's the "rectangularity" of the transformed reference image
+    sine = [pdts[0] / (vec_lengths[0] * vec_lengths[1]), pdts[1] / (vec_lengths[1] * vec_lengths[2]), pdts[2] / (vec_lengths[2] * vec_lengths[3]), pdts[3] / (vec_lengths[3] * vec_lengths[0])]
+    score = sum(sine)/len(sine)
+
+    return score, area
 
 
 def match_images(kp_img, des_img, kp_ref, des_ref):
@@ -132,7 +148,7 @@ def match_images(kp_img, des_img, kp_ref, des_ref):
             good_matches.append(m)
 
     if len(good_matches) < MIN_MATCH_COUNT:
-        return None, 0, 0
+        return None
 
     # Get the keypoints from the matches
     match_kp_img = np.float32([kp_img[m.queryIdx].pt for m in good_matches]).reshape(-1,1,2)
@@ -140,11 +156,8 @@ def match_images(kp_img, des_img, kp_ref, des_ref):
 
     # Find transformation
     mat, mask = cv2.findHomography(match_kp_img, match_kp_ref, cv2.RANSAC, 5.0)
-    matchesMask = mask.ravel().tolist()
 
-    print len(matchesMask)
-
-    return mat, len(good_matches), len(matchesMask)
+    return mat
 
 @app.route('/')
 def hello_world():
@@ -177,29 +190,29 @@ def locate():
 
             currentMat = None
             currentArea = 0.1
+            currentScore = 0.0
             currentId = None
 
             for ref in ref_database:
-                mat, numTotal, numMask = match_images(kp, des, ref[0], ref[1])
+                mat = match_images(kp, des, ref[0], ref[1])
 
                 if mat is not None:
-                    print "total: " + str(numTotal) + " mask:" + str(numMask)
-                    ratio = float(numMask)/float(numTotal)
-                    print ratio
+                    score, area = score_transformation(mat, ref[3], ref[4])
 
-                    area = score_transformation(mat, img_h, img_w, ref[3], ref[4])
-
-                    if area > currentArea:
+                    if score > currentScore:
                         currentMat = mat
                         currentId = ref[2]
                         currentArea = area
+                        currentScore = score
 
             if currentId is None:
                 return jsonify({"error": "No result"})
             else:
                 ref_match = ReferenceImage.objects(id=currentId).first()
+                transformed = transform_ref_image(currentMat, ref_match.width, ref_match.height)
+                transformed_scaled = scale(transformed, img_w, img_h)
 
-                return jsonify({"name": ref_match.name, "area": currentArea})
+                return jsonify({"metadata": ref_match.metadata, "area": currentArea, "score": currentScore, "transformed_scaled": transformed_scaled})
 
     return render_template('upload.html', message=None)
 
@@ -209,6 +222,18 @@ def match():
     print content
     return None
 
+@app.route('/clear_db', methods=['GET'])
+def clear_db():
+    # Empty the database
+    for o in ReferenceImage.objects:
+        o.delete()
+
+    # Clear the memory cache
+    ref_database = []
+    return "Database cleared"
+
+
+# Initialization
 detector, flann = init_opencv()
 db = init_database()
 ref_database = load_db_in_memory()
