@@ -5,6 +5,8 @@ from flask.ext.mongoengine import MongoEngine
 from mongoengine import *
 import math
 from metadata_extraction import extract_metadata
+from functools import wraps
+import time
 
 app = Flask(__name__)
 app.debug = True
@@ -24,6 +26,17 @@ class ReferenceImage(Document):
         ocv_des = np.array(self.descriptors,dtype=np.float32)
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
 
+def timeit(func):
+    @wraps(func)
+    def newfunc(*args):
+        startTime = time.time()
+        result = func(*args)
+        elapsedTime = time.time() - startTime
+        print('function [{}] finished in {} ms'.format(
+            func.__name__, int(elapsedTime * 1000)))
+        return result
+    return newfunc
+
 def init_opencv():
     # Initiate SIFT detector
     minHessian = 400
@@ -42,8 +55,15 @@ def init_database():
     app.config["MONGODB_SETTINGS"] = {"DB": "imagematcher"}
     return MongoEngine(app)
 
+def train_matcher(ref_image):
+    ref_database.append(ref_image)
+    #flann.add()
+
 def load_db_in_memory():
-    return [o.to_opencv_description() for o in ReferenceImage.objects]
+    ref_database = []
+    for o in ReferenceImage.objects:
+        ref_image = o.to_opencv_description()
+        train_matcher(ref_image)
 
 def open_image(file):
     # convert the data to an array for decoding
@@ -81,7 +101,7 @@ def import_image(file):
 
     # Keep the important bits in memory
     ocv_ref_image = [kp, des, refImage.id, w, h]
-    ref_database.append(ocv_ref_image)
+    train_matcher(ocv_ref_image)
 
 def transform_ref_image(mat, w_ref, h_ref):
     pts = np.float32([ [0,0],[0,h_ref-1],[w_ref-1,h_ref-1],[w_ref-1,0] ]).reshape(-1,1,2)
@@ -178,6 +198,7 @@ def upload_file():
     return render_template('upload.html', message=msg)
 
 @app.route('/locate', methods=['GET', 'POST'])
+@timeit
 def locate():
     if request.method == 'POST':
         file = request.files['file']
@@ -210,9 +231,9 @@ def locate():
             else:
                 ref_match = ReferenceImage.objects(id=currentId).first()
                 transformed = transform_ref_image(currentMat, ref_match.width, ref_match.height)
-                transformed_scaled = scale(transformed, img_w, img_h)
+                transformed_normalized = scale(transformed, img_w, img_h)
 
-                return jsonify({"metadata": ref_match.metadata, "area": currentArea, "score": currentScore, "transformed_scaled": transformed_scaled})
+                return jsonify({"metadata": ref_match.metadata, "area": currentArea, "score": currentScore, "transformed_normalized": transformed_normalized})
 
     return render_template('upload.html', message=None)
 
@@ -230,13 +251,16 @@ def clear_db():
 
     # Clear the memory cache
     ref_database = []
+    detector, flann = init_opencv()
+
     return "Database cleared"
 
 
 # Initialization
 detector, flann = init_opencv()
 db = init_database()
-ref_database = load_db_in_memory()
+ref_database = []
+load_db_in_memory()
 
 if __name__ == '__main__':
     app.run()
