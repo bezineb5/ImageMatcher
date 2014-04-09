@@ -5,8 +5,7 @@ from flask.ext.mongoengine import MongoEngine
 from mongoengine import *
 import math
 from metadata_extraction import extract_metadata
-from functools import wraps
-import time
+from profiling import timeit
 
 app = Flask(__name__)
 app.debug = True
@@ -25,17 +24,6 @@ class ReferenceImage(Document):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
         ocv_des = np.array(self.descriptors,dtype=np.float32)
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
-
-def timeit(func):
-    @wraps(func)
-    def newfunc(*args):
-        startTime = time.time()
-        result = func(*args)
-        elapsedTime = time.time() - startTime
-        print('function [{}] finished in {} ms'.format(
-            func.__name__, int(elapsedTime * 1000)))
-        return result
-    return newfunc
 
 def init_opencv():
     # Initiate SIFT detector
