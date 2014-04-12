@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, url_for, send_file, make_response
 import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
@@ -6,6 +6,7 @@ from mongoengine import *
 import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
+import StringIO
 
 # Flask application
 app = Flask(__name__)
@@ -25,6 +26,7 @@ class ReferenceImage(Document):
     width = IntField(required=True)
     height = IntField(required=True)
     metadata = DynamicField()
+    thumbnail = ImageField(size=(800, 600, True), collection_name='reference_thumbnails')
 
     def to_opencv_description(self):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
@@ -64,6 +66,7 @@ def load_db_in_memory():
         train_matcher(ref_image, ref_image[1])
 
 
+@timeit
 def open_image(file):
     # convert the data to an array for decoding
     file.seek(0)
@@ -71,7 +74,7 @@ def open_image(file):
     img = cv2.imdecode(img_array, 0)
 
     # rescale to have the largest side at 1024px
-    x, y = img.shape
+    y, x = img.shape
     new_x, new_y = 0, 0
 
     if x > y:
@@ -81,29 +84,37 @@ def open_image(file):
         new_y = MAX_IMAGE_SIZE
         new_x = x * new_y / y
 
-    img_resized = cv2.resize(img, (new_x, new_x), interpolation=cv2.INTER_AREA)
+    img_resized = cv2.resize(img, (new_x, new_y), interpolation=cv2.INTER_AREA)
 
     return img_resized
 
 
 def import_image(file):
     img = open_image(file)
-    w, h = img.shape
+    height, width = img.shape
 
     metadata = extract_metadata(file)
 
-    # find the keypoints and descriptors with SIFT
+    # find the keypoints and descriptors with SURF
     kp, des = detector.detectAndCompute(img, None)
+
+    # Save the thumbnail
+    thumbnail = StringIO.StringIO()
+    thumbnail.write(np.array(cv2.imencode(".jpg", img)[1]).tostring())
+    thumbnail.seek(0)
 
     # Store the description of the image in the DB
     converted_kp = [[p.pt[0], p.pt[1], p.size] for p in kp]
-    refImage = ReferenceImage(keypoints=converted_kp,
-                              descriptors=des,
-                              width=w, height=h,
-                              metadata=metadata).save()
+    ref_image = ReferenceImage(keypoints=converted_kp,
+                               descriptors=des,
+                               width=width, height=height,
+                               metadata=metadata)
+    ref_image.thumbnail.put(thumbnail, content_type='image/jpeg')
+
+    ref_image.save()
 
     # Keep the important bits in memory
-    ocv_ref_image = [kp, des, refImage.id, w, h]
+    ocv_ref_image = [kp, des, ref_image.id, width, height]
     train_matcher(ocv_ref_image, des)
 
 
@@ -183,7 +194,7 @@ def match_images(kp_img, des_img):
             grouped_matches[m.imgIdx] = [m]
 
     for m, n in matches:
-        if m.distance < 0.7*n.distance:
+        if m.distance < 0.7 * n.distance:
             append_match(m)
             append_match(n)
 
@@ -271,13 +282,20 @@ def process_image(file):
     currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
     if currentId is None:
-        return {"error": "No result"}
+        return {"error": "No result"}, 404
     else:
         ref_match = ReferenceImage.objects(id=currentId).first()
-        transformed = transform_ref_image(currentMat, ref_match.width, ref_match.height)
+        transformed = transform_ref_image(currentMat,
+                                          ref_match.width,
+                                          ref_match.height)
         transformed_normalized = normalize(transformed, img_w, img_h)
+        thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
 
-        return {"metadata": ref_match.metadata, "area": currentArea, "score": currentScore, "transformed_normalized": transformed_normalized}
+        return {"metadata": ref_match.metadata,
+                "area": currentArea,
+                "score": currentScore,
+                "transformed_normalized": transformed_normalized,
+                "thumbnail_url": thumbnail_url}, 200
 
 
 @app.route('/locate', methods=['GET', 'POST'])
@@ -286,12 +304,19 @@ def locate():
     if request.method == 'POST':
         file = request.files['file']
         if file:
-            result = process_image(file)
-            return jsonify(result)
+            result, status_code = process_image(file)
+            return make_response(jsonify(result), status_code)
         else:
             msg = "No input file to process"
 
     return render_template('upload.html', message=msg)
+
+
+@app.route('/reference/<reference_image_id>/thumbnail.jpg', methods=['GET'])
+def get_thumbnail(reference_image_id):
+    ref_image = ReferenceImage.objects(id=reference_image_id).first()
+    thumbnail_file = ref_image.thumbnail
+    return send_file(thumbnail_file, mimetype=thumbnail_file.content_type)
 
 
 @app.route('/match', methods=['POST'])
