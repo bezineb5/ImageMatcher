@@ -312,7 +312,14 @@ def locate():
     return render_template('upload.html', message=msg)
 
 
-@app.route('/reference/<reference_image_id>/thumbnail.jpg', methods=['GET'])
+@app.route('/references/', methods=['GET'])
+def list_reference_images():
+    images = [{"id": str(o.id), "metadata": o.metadata, "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id)} for o in ReferenceImage.objects]
+    response = {"count": len(images), "images": images}
+    return jsonify(response)
+
+
+@app.route('/references/<reference_image_id>/thumbnail', methods=['GET'])
 def get_thumbnail(reference_image_id):
     ref_image = ReferenceImage.objects(id=reference_image_id).first()
     thumbnail_file = ref_image.thumbnail
