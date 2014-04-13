@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify, url_for, send_file, 
 import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
-from mongoengine import *
+from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField
 import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
@@ -14,7 +14,8 @@ app.debug = True
 
 # Constants
 MIN_MATCH_COUNT = 5
-MAX_IMAGE_SIZE = 512
+MAX_REF_IMAGE_SIZE = 512
+MAX_MATCH_IMAGE_SIZE = 1024
 
 # In-memory database
 ref_database = []
@@ -66,31 +67,41 @@ def load_db_in_memory():
         train_matcher(ref_image, ref_image[1])
 
 
+def fit_image(img, max_border_size):
+    # rescale to have the largest side at max_border_size
+    y, x = img.shape
+
+    if y > max_border_size or x > max_border_size:
+        new_x, new_y = 0, 0
+
+        if x > y:
+            new_x = max_border_size
+            new_y = y * new_x / x
+        else:
+            new_y = max_border_size
+            new_x = x * new_y / y
+
+        return cv2.resize(img, (new_x, new_y), interpolation=cv2.INTER_AREA)
+    else:
+        return img
+
+
 @timeit
-def open_image(file):
+def open_image(file, max_border_size):
     # convert the data to an array for decoding
+    # Go back to the begining of the stream, if needed
     file.seek(0)
     img_array = np.asarray(bytearray(file.read()), dtype=np.uint8)
     img = cv2.imdecode(img_array, 0)
+    if img is None:
+        return None
 
-    # rescale to have the largest side at 1024px
-    y, x = img.shape
-    new_x, new_y = 0, 0
-
-    if x > y:
-        new_x = MAX_IMAGE_SIZE
-        new_y = y * new_x / x
-    else:
-        new_y = MAX_IMAGE_SIZE
-        new_x = x * new_y / y
-
-    img_resized = cv2.resize(img, (new_x, new_y), interpolation=cv2.INTER_AREA)
-
+    img_resized = fit_image(img, max_border_size)
     return img_resized
 
 
 def import_image(file):
-    img = open_image(file)
+    img = open_image(file, MAX_REF_IMAGE_SIZE)
     height, width = img.shape
 
     metadata = extract_metadata(file)
@@ -273,7 +284,7 @@ def upload_file():
 
 @timeit
 def process_image(file):
-    img = open_image(file)
+    img = open_image(file, MAX_MATCH_IMAGE_SIZE)
     img_h, img_w = img.shape
 
     # find the keypoints and descriptors with SIFT
