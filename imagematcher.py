@@ -36,9 +36,11 @@ class ReferenceImage(Document):
 
 
 def init_opencv():
-    # Initiate SIFT detector
-    minHessian = 400
-    surf = cv2.SURF(minHessian)
+    # Initiate SURF detector
+    min_hessian_import = 400
+    min_hessian_match = 400
+    surf_import = cv2.SURF(min_hessian_import)
+    surf_match = cv2.SURF(min_hessian_match)
 
     # FLANN parameters
     FLANN_INDEX_KDTREE = 0
@@ -47,7 +49,7 @@ def init_opencv():
 
     flann = cv2.FlannBasedMatcher(index_params, search_params)
 
-    return surf, flann
+    return surf_import, surf_match, flann
 
 
 def init_database():
@@ -107,7 +109,7 @@ def import_image(file):
     metadata = extract_metadata(file)
 
     # find the keypoints and descriptors with SURF
-    kp, des = detector.detectAndCompute(img, None)
+    kp, des = detector_import.detectAndCompute(img, None)
 
     # Save the thumbnail
     thumbnail = StringIO.StringIO()
@@ -288,7 +290,7 @@ def process_image(file):
     img_h, img_w = img.shape
 
     # find the keypoints and descriptors with SIFT
-    kp, des = detector.detectAndCompute(img, None)
+    kp, des = detector_match.detectAndCompute(img, None)
 
     currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
@@ -352,13 +354,13 @@ def clear_db():
 
     # Clear the memory cache
     ref_database = []
-    detector, matcher = init_opencv()
+    detector_import, detector_match, matcher = init_opencv()
 
     return "Database cleared"
 
 
 # Initialization
-detector, matcher = init_opencv()
+detector_import, detector_match, matcher = init_opencv()
 db = init_database()
 load_db_in_memory()
 
