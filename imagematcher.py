@@ -56,7 +56,7 @@ def init_opencv():
     FLANN_INDEX_KDTREE = 1
     FLANN_INDEX_LSH = 6
 
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=8)
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=4)
     #index_params = dict(algorithm=FLANN_INDEX_LSH,
     #                    table_number=8,  # 12
     #                    key_size=30,     # 20
@@ -125,6 +125,8 @@ def detectAndComputeDescriptors(img):
     # find the keypoints and descriptors with SURF
     kp = detector.detect(img, None)
     kp, des = extractor.compute(img, kp)
+
+    print "Number of descriptors: " + str(len(kp))
     return kp, des
 
 
