@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify, url_for, send_file, 
 import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
-from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField
+from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, BinaryField
 import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
@@ -17,13 +17,14 @@ MIN_MATCH_COUNT = 5
 MAX_REF_IMAGE_SIZE = 512
 MAX_MATCH_IMAGE_SIZE = 1024
 
-# In-memory database
+# In-memory cache
 ref_database = []
 
 
 class ReferenceImage(Document):
     keypoints = ListField(ListField(), required=True)
     descriptors = ListField(ListField(FloatField()), required=True)
+    #descriptors = ListField(BinaryField(), required=True)
     width = IntField(required=True)
     height = IntField(required=True)
     metadata = DynamicField()
@@ -32,24 +33,42 @@ class ReferenceImage(Document):
     def to_opencv_description(self):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
         ocv_des = np.array(self.descriptors, dtype=np.float32)
+        # For BRISK descriptors
+        #ocv_des = np.asarray([np.fromstring(d, dtype=np.uint8) for d in self.descriptors])
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
 
 
 def init_opencv():
     # Initiate SURF detector
-    min_hessian_import = 400
-    min_hessian_match = 400
-    surf_import = cv2.SURF(min_hessian_import)
-    surf_match = cv2.SURF(min_hessian_match)
+    #min_hessian_import = 400
+    #min_hessian_match = 400
+    #surf_import = cv2.SURF(min_hessian_import)
+    #surf_match = cv2.SURF(min_hessian_match)
+
+    # BRISK detector
+    #extractor = cv2.DescriptorExtractor_create('BRISK')
+    #detector = cv2.BRISK(thresh=10, octaves=0) 
+    min_hessian = 500
+    extractor = cv2.SURF(min_hessian)
+    detector = extractor
 
     # FLANN parameters
-    FLANN_INDEX_KDTREE = 0
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    FLANN_INDEX_KDTREE = 1
+    FLANN_INDEX_LSH = 6
+
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=8)
+    #index_params = dict(algorithm=FLANN_INDEX_LSH,
+    #                    table_number=8,  # 12
+    #                    key_size=30,     # 20
+    #                    multi_probe_level=2)  # 2
+
     search_params = dict(checks=50)   # or pass empty dictionary
 
     flann = cv2.FlannBasedMatcher(index_params, search_params)
+    #flann = cv2.BFMatcher()
+    #flann = indexed_descriptors.Matcher()
 
-    return surf_import, surf_match, flann
+    return detector, extractor, flann
 
 
 def init_database():
@@ -102,14 +121,20 @@ def open_image(file, max_border_size):
     return img_resized
 
 
+def detectAndComputeDescriptors(img):
+    # find the keypoints and descriptors with SURF
+    kp = detector.detect(img, None)
+    kp, des = extractor.compute(img, kp)
+    return kp, des
+
+
 def import_image(file):
     img = open_image(file, MAX_REF_IMAGE_SIZE)
     height, width = img.shape
 
     metadata = extract_metadata(file)
 
-    # find the keypoints and descriptors with SURF
-    kp, des = detector_import.detectAndCompute(img, None)
+    kp, des = detectAndComputeDescriptors(img)
 
     # Save the thumbnail
     thumbnail = StringIO.StringIO()
@@ -118,6 +143,7 @@ def import_image(file):
 
     # Store the description of the image in the DB
     converted_kp = [[p.pt[0], p.pt[1], p.size] for p in kp]
+    # Needed for BRISK converted_des = [d.tostring() for d in des]
     ref_image = ReferenceImage(keypoints=converted_kp,
                                descriptors=des,
                                width=width, height=height,
@@ -206,10 +232,15 @@ def match_images(kp_img, des_img):
         else:
             grouped_matches[m.imgIdx] = [m]
 
-    for m, n in matches:
-        if m.distance < 0.7 * n.distance:
-            append_match(m)
-            append_match(n)
+    for m in matches:
+        l = len(m)
+        if l >= 2:
+            a, b = m
+            if a.distance < 0.7 * b.distance:
+                append_match(a)
+                append_match(b)
+        elif l == 1:
+            append_match(m[0])
 
     #print grouped_matches
 
@@ -289,8 +320,8 @@ def process_image(file):
     img = open_image(file, MAX_MATCH_IMAGE_SIZE)
     img_h, img_w = img.shape
 
-    # find the keypoints and descriptors with SIFT
-    kp, des = detector_match.detectAndCompute(img, None)
+    # find the keypoints and descriptors
+    kp, des = detectAndComputeDescriptors(img)
 
     currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
@@ -304,7 +335,8 @@ def process_image(file):
         transformed_normalized = normalize(transformed, img_w, img_h)
         thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
 
-        return {"metadata": ref_match.metadata,
+        return {"id": str(currentId),
+                "metadata": ref_match.metadata,
                 "area": currentArea,
                 "score": currentScore,
                 "transformed_normalized": transformed_normalized,
@@ -354,14 +386,15 @@ def clear_db():
 
     # Clear the memory cache
     ref_database = []
-    detector_import, detector_match, matcher = init_opencv()
+    detector, extractor, matcher = init_opencv()
 
     return "Database cleared"
 
 
 # Initialization
-detector_import, detector_match, matcher = init_opencv()
+detector, extractor, matcher = init_opencv()
 db = init_database()
+#clear_db()
 load_db_in_memory()
 
 if __name__ == '__main__':
