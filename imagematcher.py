@@ -13,6 +13,7 @@ app = Flask(__name__)
 app.debug = True
 
 # Constants
+MIN_NUMBER_OF_FEATURES = 100
 MIN_MATCH_COUNT = 5
 MAX_REF_IMAGE_SIZE = 512
 MAX_MATCH_IMAGE_SIZE = 1024
@@ -47,10 +48,10 @@ def init_opencv():
 
     # BRISK detector
     #extractor = cv2.DescriptorExtractor_create('BRISK')
-    #detector = cv2.BRISK(thresh=10, octaves=0) 
-    min_hessian = 500
-    extractor = cv2.SURF(min_hessian)
-    detector = extractor
+    #detector = cv2.BRISK(thresh=10, octaves=0)
+
+    extractor = cv2.SURF(1500, 4, 2, False)
+    detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
 
     # FLANN parameters
     FLANN_INDEX_KDTREE = 1
@@ -68,7 +69,7 @@ def init_opencv():
     #flann = cv2.BFMatcher()
     #flann = indexed_descriptors.Matcher()
 
-    return detector, extractor, flann
+    return detectors, extractor, flann
 
 
 def init_database():
@@ -121,9 +122,18 @@ def open_image(file, max_border_size):
     return img_resized
 
 
+@timeit
 def detectAndComputeDescriptors(img):
     # find the keypoints and descriptors with SURF
-    kp = detector.detect(img, None)
+    kp = None
+    i = 0
+    for detector in detectors:
+        i = i + 1
+        kp = detector.detect(img, None)
+        if len(kp) >= MIN_NUMBER_OF_FEATURES:
+            print "Exit at " + str(i)
+            break
+
     kp, des = extractor.compute(img, kp)
 
     print "Number of descriptors: " + str(len(kp))
@@ -216,6 +226,7 @@ def score_transformation(mat, w_ref, h_ref):
     return score, area
 
 
+@timeit
 def match_images(kp_img, des_img):
     matches = matcher.knnMatch(des_img, k=2)
 
@@ -388,13 +399,13 @@ def clear_db():
 
     # Clear the memory cache
     ref_database = []
-    detector, extractor, matcher = init_opencv()
+    detectors, extractor, matcher = init_opencv()
 
     return "Database cleared"
 
 
 # Initialization
-detector, extractor, matcher = init_opencv()
+detectors, extractor, matcher = init_opencv()
 db = init_database()
 #clear_db()
 load_db_in_memory()
