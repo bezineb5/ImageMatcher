@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify, url_for, send_file, 
 import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
-from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, BinaryField
+from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField
 import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
@@ -124,10 +124,21 @@ def open_image(file, max_border_size):
 
 @timeit
 def detectAndComputeDescriptors(img):
+    # Optimization: choose the detector according to the number of pixels
+    height, width = img.shape
+    surface = height * width
+    sensitive = False
+    if surface < 1024*512:
+        sensitive = True
+
     # find the keypoints and descriptors with SURF
     kp = None
     i = 0
-    for detector in detectors:
+    list_detectors = detectors
+    if sensitive:
+        list_detectors = list_detectors[1:]
+
+    for detector in list_detectors:
         i = i + 1
         kp = detector.detect(img, None)
         if len(kp) >= MIN_NUMBER_OF_FEATURES:
