@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify, url_for, send_file, 
 import cv2
 import numpy as np
 from flask.ext.mongoengine import MongoEngine
-from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField
+from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, FileField
 import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
@@ -30,6 +30,7 @@ class ReferenceImage(Document):
     height = IntField(required=True)
     metadata = DynamicField()
     thumbnail = ImageField(size=(800, 600, True), collection_name='reference_thumbnails')
+    music_attachment = FileField(collection_name='music_attachments')
 
     def to_opencv_description(self):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
@@ -73,7 +74,7 @@ def init_opencv():
 
 
 def init_database():
-    app.config["MONGODB_SETTINGS"] = {"DB": "imagematcher"}
+    app.config["MONGODB_SETTINGS"] = {"DB": "imagematcher_with_music"}
     return MongoEngine(app)
 
 
@@ -128,7 +129,7 @@ def detectAndComputeDescriptors(img):
     height, width = img.shape
     surface = height * width
     sensitive = False
-    if surface < 1024*512:
+    if surface < 1024 * 512:
         sensitive = True
 
     # find the keypoints and descriptors with SURF
@@ -151,7 +152,7 @@ def detectAndComputeDescriptors(img):
     return kp, des
 
 
-def import_image(file):
+def import_image(file, music_file):
     img = open_image(file, MAX_REF_IMAGE_SIZE)
     height, width = img.shape
 
@@ -172,6 +173,9 @@ def import_image(file):
                                width=width, height=height,
                                metadata=metadata)
     ref_image.thumbnail.put(thumbnail, content_type='image/jpeg')
+
+    # Music attached to the image
+    import_music(ref_image, music_file)
 
     ref_image.save()
 
@@ -329,9 +333,10 @@ def upload_file():
     msg = None
 
     if request.method == 'POST':
-        file = request.files['file']
-        if file:
-            import_image(file)
+        image_file = request.files['file']
+        music_file = request.files['musicFile']
+        if image_file and music_file:
+            import_image(image_file, music_file)
             msg = "Upload successful"
         else:
             msg = "Upload failed"
@@ -358,13 +363,19 @@ def process_image(file):
                                           ref_match.height)
         transformed_normalized = normalize(transformed, img_w, img_h)
         thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
+        music_url = url_for('get_music_attachment', reference_image_id=currentId)
 
         return {"id": str(currentId),
                 "metadata": ref_match.metadata,
                 "area": currentArea,
                 "score": currentScore,
                 "transformed_normalized": transformed_normalized,
-                "thumbnail_url": thumbnail_url}, 200
+                "thumbnail_url": thumbnail_url,
+                "music_url": music_url}, 200
+
+
+def import_music(ref_image, file):
+    ref_image.music_attachment.put(file, content_type='audio/mpeg')
 
 
 @app.route('/locate', methods=['GET', 'POST'])
@@ -378,12 +389,16 @@ def locate():
         else:
             msg = "No input file to process"
 
-    return render_template('upload.html', message=msg)
+    return render_template('locate.html', message=msg)
 
 
 @app.route('/references/', methods=['GET'])
 def list_reference_images():
-    images = [{"id": str(o.id), "metadata": o.metadata, "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id)} for o in ReferenceImage.objects]
+    images = [{"id": str(o.id),
+               "metadata": o.metadata,
+               "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id),
+               "music_url": url_for('get_music_attachment', reference_image_id=o.id)
+               } for o in ReferenceImage.objects]
     response = {"count": len(images), "images": images}
     return jsonify(response)
 
@@ -415,6 +430,13 @@ def clear_db():
     return "Database cleared"
 
 
+@app.route('/references/<reference_image_id>/music', methods=['GET'])
+def get_music_attachment(reference_image_id):
+    ref_image = ReferenceImage.objects(id=reference_image_id).first()
+    music_file = ref_image.music_attachment
+    return send_file(music_file, mimetype=music_file.content_type)
+
+
 # Initialization
 detectors, extractor, matcher = init_opencv()
 db = init_database()
@@ -422,4 +444,4 @@ db = init_database()
 load_db_in_memory()
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=52300)
