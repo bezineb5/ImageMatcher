@@ -152,7 +152,7 @@ def detectAndComputeDescriptors(img):
     return kp, des
 
 
-def import_image(file, music_file):
+def import_image(file):
     img = open_image(file, MAX_REF_IMAGE_SIZE)
     height, width = img.shape
 
@@ -173,9 +173,6 @@ def import_image(file, music_file):
                                width=width, height=height,
                                metadata=metadata)
     ref_image.thumbnail.put(thumbnail, content_type='image/jpeg')
-
-    # Music attached to the image
-    import_music(ref_image, music_file)
 
     ref_image.save()
 
@@ -324,8 +321,8 @@ def find_transformation(kp_img, ref_image, good_matches):
 
 
 @app.route('/')
-def hello_world():
-    return 'Hello World!'
+def main_page():
+    return render_template('index.html')
 
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -334,9 +331,8 @@ def upload_file():
 
     if request.method == 'POST':
         image_file = request.files['file']
-        music_file = request.files['musicFile']
-        if image_file and music_file:
-            import_image(image_file, music_file)
+        if image_file:
+            import_image(image_file)
             msg = "Upload successful"
         else:
             msg = "Upload failed"
@@ -363,19 +359,28 @@ def process_image(file):
                                           ref_match.height)
         transformed_normalized = normalize(transformed, img_w, img_h)
         thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
-        music_url = url_for('get_music_attachment', reference_image_id=currentId)
 
-        return {"id": str(currentId),
-                "metadata": ref_match.metadata,
-                "area": currentArea,
-                "score": currentScore,
-                "transformed_normalized": transformed_normalized,
-                "thumbnail_url": thumbnail_url,
-                "music_url": music_url}, 200
+        result = {"id": str(currentId),
+                  "metadata": ref_match.metadata,
+                  "area": currentArea,
+                  "score": currentScore,
+                  "transformed_normalized": transformed_normalized,
+                  "thumbnail_url": thumbnail_url}
+
+        music_file = ref_image.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            result["music_url"] = url_for('get_music_attachment', reference_image_id=currentId)
+
+        return result, 200
 
 
 def import_music(ref_image, file):
-    ref_image.music_attachment.put(file, content_type='audio/mpeg')
+    if file is not None:
+        music_file = ref_image.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            music_file.delete()
+
+        music_file.put(file, content_type='audio/mpeg')
 
 
 @app.route('/locate', methods=['GET', 'POST'])
@@ -394,11 +399,20 @@ def locate():
 
 @app.route('/references/', methods=['GET'])
 def list_reference_images():
-    images = [{"id": str(o.id),
+    images = []
+
+    for o in ReferenceImage.objects:
+        ref = {"id": str(o.id),
                "metadata": o.metadata,
                "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id),
-               "music_url": url_for('get_music_attachment', reference_image_id=o.id)
-               } for o in ReferenceImage.objects]
+               }
+
+        music_file = o.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            ref["music_url"] = url_for('get_music_attachment', reference_image_id=o.id)
+
+        images.append(ref)
+
     response = {"count": len(images), "images": images}
     return jsonify(response)
 
@@ -430,11 +444,28 @@ def clear_db():
     return "Database cleared"
 
 
-@app.route('/references/<reference_image_id>/music', methods=['GET'])
+@app.route('/references/<reference_image_id>/music', methods=['GET', 'PUT', 'POST'])
 def get_music_attachment(reference_image_id):
     ref_image = ReferenceImage.objects(id=reference_image_id).first()
-    music_file = ref_image.music_attachment
-    return send_file(music_file, mimetype=music_file.content_type)
+
+    if request.method == 'POST' or request.method == 'PUT':
+        # Music attached to the image
+        music_file = request.files['musicFile']
+        import_music(ref_image, music_file)
+        ref_image.save()
+        return make_response(jsonify({"success": True}), 200)
+    elif request.method == 'GET':
+        music_file = ref_image.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            return send_file(music_file, mimetype=music_file.content_type)
+        else:
+            return make_response(jsonify({"error": "No music"}), 404)
+
+
+@app.route('/references/<reference_image_id>/music/upload', methods=['GET'])
+def upload_music_page(reference_image_id):
+    msg = None
+    return render_template('upload_music.html', message=msg, ref_id=reference_image_id)
 
 
 # Initialization
