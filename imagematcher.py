@@ -367,7 +367,7 @@ def process_image(file):
                   "transformed_normalized": transformed_normalized,
                   "thumbnail_url": thumbnail_url}
 
-        music_file = ref_image.music_attachment
+        music_file = ref_match.music_attachment
         if music_file is not None and music_file.get() is not None:
             result["music_url"] = url_for('get_music_attachment', reference_image_id=currentId)
 
