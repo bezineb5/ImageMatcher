@@ -128,7 +128,7 @@ def detectAndComputeDescriptors(img):
     height, width = img.shape
     surface = height * width
     sensitive = False
-    if surface < 1024*512:
+    if surface < 1024 * 512:
         sensitive = True
 
     # find the keypoints and descriptors with SURF
@@ -347,6 +347,33 @@ def process_image(file):
     # find the keypoints and descriptors
     kp, des = detectAndComputeDescriptors(img)
 
+    msg, code = process_descriptors(kp, des, img_h, img_w)
+    return msg, code
+
+
+@timeit
+def process_image_description(imageDescription):
+    img_h = imageDescription['height']
+    img_w = imageDescription['width']
+    descriptors = imageDescription['descriptors']
+
+    all_descriptors = []
+    ocv_kp = []
+
+    for d in descriptors:
+        kp = cv2.KeyPoint(d['x'], d['y'], d['size'])
+        desc = d['value']
+
+        ocv_kp.append(kp)
+        all_descriptors.append(desc)
+
+    ocv_des = np.array(all_descriptors, dtype=np.float32)
+
+    msg, code = process_descriptors(ocv_kp, ocv_des, img_h, img_w)
+    return msg, code
+
+
+def process_descriptors(kp, des, img_h, img_w):
     currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
     if currentId is None:
@@ -383,7 +410,9 @@ def locate():
 
 @app.route('/references/', methods=['GET'])
 def list_reference_images():
-    images = [{"id": str(o.id), "metadata": o.metadata, "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id)} for o in ReferenceImage.objects]
+    images = [{"id": str(o.id),
+               "metadata": o.metadata,
+               "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id)} for o in ReferenceImage.objects]
     response = {"count": len(images), "images": images}
     return jsonify(response)
 
@@ -395,11 +424,13 @@ def get_thumbnail(reference_image_id):
     return send_file(thumbnail_file, mimetype=thumbnail_file.content_type)
 
 
-@app.route('/match', methods=['POST'])
+@app.route('/locateWithDescription', methods=['POST'])
 def match():
-    content = request.json
-    print content
-    return None
+    imageDescription = request.json
+    print imageDescription
+
+    result, status_code = process_image_description(imageDescription)
+    return make_response(jsonify(result), status_code)
 
 
 @app.route('/clear_db', methods=['GET'])
@@ -423,3 +454,4 @@ load_db_in_memory()
 
 if __name__ == '__main__':
     app.run()
+
