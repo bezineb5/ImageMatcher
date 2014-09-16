@@ -316,7 +316,7 @@ def find_transformation(kp_img, ref_image, good_matches):
     match_kp_ref = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
 
     # Find transformation
-    mat, mask = cv2.findHomography(match_kp_img, match_kp_ref, cv2.RANSAC, 5.0)
+    mat, mask = cv2.findHomography(match_kp_ref, match_kp_img, cv2.RANSAC, 5.0)
     return mat
 
 

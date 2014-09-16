@@ -1,6 +1,6 @@
-var phonecatApp = angular.module('imageMatcherApp', []);
+var imageMatcherApp = angular.module('imageMatcherApp', []);
 
-phonecatApp.controller('ImageListController', function ($scope, $http) {
+imageMatcherApp.controller('ImageListController', function ($scope, $http) {
   $http.get('references/').success(function(data) {
     $scope.referenceImages = data;
   });
