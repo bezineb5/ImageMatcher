@@ -25,7 +25,7 @@ ref_database = []
 class ReferenceImage(Document):
     keypoints = ListField(ListField(), required=True)
     descriptors = ListField(ListField(FloatField()), required=True)
-    #descriptors = ListField(BinaryField(), required=True)
+    # descriptors = ListField(BinaryField(), required=True)
     width = IntField(required=True)
     height = IntField(required=True)
     metadata = DynamicField()
@@ -36,7 +36,7 @@ class ReferenceImage(Document):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
         ocv_des = np.array(self.descriptors, dtype=np.float32)
         # For BRISK descriptors
-        #ocv_des = np.asarray([np.fromstring(d, dtype=np.uint8) for d in self.descriptors])
+        # ocv_des = np.asarray([np.fromstring(d, dtype=np.uint8) for d in self.descriptors])
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
 
 
@@ -289,21 +289,21 @@ def match_images(kp_img, des_img):
                     currentArea = area
                     currentScore = score
 
-    #good_matches = []
-    #for m, n in matches:
+    # good_matches = []
+    # for m, n in matches:
     #    if m.distance < 0.7*n.distance:
     #        good_matches.append(m)
     #        print m.imgIdx
 
-    #if len(good_matches) < MIN_MATCH_COUNT:
+    # if len(good_matches) < MIN_MATCH_COUNT:
     #    return None
 
     # Get the keypoints from the matches
-    #match_kp_img = np.float32([kp_img[m.queryIdx].pt for m in good_matches]).reshape(-1,1,2)
-    #match_kp_ref = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1,1,2)
+    # match_kp_img = np.float32([kp_img[m.queryIdx].pt for m in good_matches]).reshape(-1,1,2)
+    # match_kp_ref = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1,1,2)
 
     # Find transformation
-    #mat, mask = cv2.findHomography(match_kp_img, match_kp_ref, cv2.RANSAC, 5.0)
+    # mat, mask = cv2.findHomography(match_kp_img, match_kp_ref, cv2.RANSAC, 5.0)
 
     return currentId, currentMat, currentArea, currentScore
 
@@ -322,7 +322,7 @@ def find_transformation(kp_img, ref_image, good_matches):
 
 @app.route('/')
 def main_page():
-    return render_template('index.html')
+    return render_template('index2.html')
 
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -471,7 +471,7 @@ def upload_music_page(reference_image_id):
 # Initialization
 detectors, extractor, matcher = init_opencv()
 db = init_database()
-#clear_db()
+# clear_db()
 load_db_in_memory()
 
 if __name__ == '__main__':
