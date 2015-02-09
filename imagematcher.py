@@ -7,6 +7,7 @@ import math
 from metadata_extraction import extract_metadata
 from profiling import timeit
 import StringIO
+import os
 
 # Flask application
 app = Flask(__name__)
@@ -74,8 +75,13 @@ def init_opencv():
 
 
 def init_database():
+
     app.config["MONGODB_SETTINGS"] = {
-        'db': "imagematcher_with_music"
+        'db': "imagematcher_with_music",
+        'host': os.environ('OPENSHIFT_MONGODB_DB_HOST'),
+        'port': os.environ('OPENSHIFT_MONGODB_DB_PORT'),
+        'username': os.environ('OPENSHIFT_MONGODB_DB_USERNAME'),
+        'password': os.environ('OPENSHIFT_MONGODB_DB_PASSWORD')
     }
     return MongoEngine(app)
 
