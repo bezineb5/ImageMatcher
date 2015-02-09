@@ -74,7 +74,9 @@ def init_opencv():
 
 
 def init_database():
-    app.config["MONGODB_SETTINGS"] = {"DB": "imagematcher_with_music"}
+    app.config["MONGODB_SETTINGS"] = {
+        'db': "imagematcher_with_music"
+    }
     return MongoEngine(app)
 
 
