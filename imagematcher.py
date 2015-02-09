@@ -79,7 +79,7 @@ def init_database():
     app.config["MONGODB_SETTINGS"] = {
         'db': "imagematcher",
         'host': os.environ['OPENSHIFT_MONGODB_DB_HOST'],
-        'port': int(os.environ['OPENSHIFT_MONGODB_DB_PORT'],
+        'port': int(os.environ['OPENSHIFT_MONGODB_DB_PORT']),
         'username': os.environ['OPENSHIFT_MONGODB_DB_USERNAME'],
         'password': os.environ['OPENSHIFT_MONGODB_DB_PASSWORD']
     }
