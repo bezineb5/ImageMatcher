@@ -78,10 +78,10 @@ def init_database():
 
     app.config["MONGODB_SETTINGS"] = {
         'db': "imagematcher_with_music",
-        'host': os.environ('OPENSHIFT_MONGODB_DB_HOST'),
-        'port': os.environ('OPENSHIFT_MONGODB_DB_PORT'),
-        'username': os.environ('OPENSHIFT_MONGODB_DB_USERNAME'),
-        'password': os.environ('OPENSHIFT_MONGODB_DB_PASSWORD')
+        'host': os.environ['OPENSHIFT_MONGODB_DB_HOST'],
+        'port': os.environ['OPENSHIFT_MONGODB_DB_PORT'],
+        'username': os.environ['OPENSHIFT_MONGODB_DB_USERNAME'],
+        'password': os.environ['OPENSHIFT_MONGODB_DB_PASSWORD']
     }
     return MongoEngine(app)
 
