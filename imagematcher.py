@@ -11,7 +11,7 @@ import os
 
 # Flask application
 app = Flask(__name__)
-app.debug = False
+app.debug = True
 
 # Constants
 MIN_NUMBER_OF_FEATURES = 100
