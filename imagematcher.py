@@ -1,6 +1,7 @@
 from flask import Flask, request, render_template, jsonify, url_for, send_file, make_response
 import cv2
 import numpy as np
+from flask.ext import restful
 from flask.ext.mongoengine import MongoEngine
 from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, FileField
 import math
@@ -8,16 +9,21 @@ from metadata_extraction import extract_metadata
 from profiling import timeit
 import StringIO
 import os
+from operator import itemgetter
 
 # Flask application
 app = Flask(__name__)
 app.debug = True
+
+# RESTful API
+api = restful.Api(app)
 
 # Constants
 MIN_NUMBER_OF_FEATURES = 100
 MIN_MATCH_COUNT = 5
 MAX_REF_IMAGE_SIZE = 512
 MAX_MATCH_IMAGE_SIZE = 1024
+MAX_IMAGES_FOUND = 5
 
 # In-memory cache
 ref_database = []
@@ -40,17 +46,81 @@ class ReferenceImage(Document):
         # ocv_des = np.asarray([np.fromstring(d, dtype=np.uint8) for d in self.descriptors])
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
 
+    def to_simple_object(self):
+        ref = {"id": str(self.id),
+               "metadata": self.metadata,
+               "thumbnail_url": url_for('get_thumbnail',
+                                        reference_image_id=self.id),
+               }
+
+        music_file = self.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            ref["music_url"] = url_for('get_music_attachment',
+                                       reference_image_id=self.id)
+
+        return ref
+
+    def delete_attachments(self):
+        if self.thumbnail is not None:
+            self.thumbnail.delete()
+            self.thumbnail = None
+        music_file = self.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            self.music_attachment = None
+            music_file.delete()
+        self.save()
+
+
+class ReferenceImageListAPI(restful.Resource):
+    def get(self):
+        images = map(lambda o: o.to_simple_object(), ReferenceImage.objects)
+        return {"count": len(images), "images": images}
+
+    def post(self):
+        image_file = request.files['image']
+        if image_file:
+            ref_image = import_image(image_file)
+            music_file = request.files['music']
+            if music_file:
+                import_music(ref_image, music_file)
+                ref_image.save()
+
+            return ref_image.to_simple_object()
+        else:
+            restful.abort(404, "Upload failed")
+
+
+class ReferenceImageAPI(restful.Resource):
+    def get(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        return ref_image.to_simple_object()
+
+    def delete(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        if ref_image is not None:
+            ref_image.delete_attachments()
+            ref_image.delete()
+        pass
+
+
+api.add_resource(ReferenceImageListAPI,
+                 '/api/1.0/references/',
+                 endpoint='reference_image_list')
+api.add_resource(ReferenceImageAPI,
+                 '/api/1.0/references/<string:ref_image_id>',
+                 endpoint='reference_image')
+
 
 def init_opencv():
     # Initiate SURF detector
-    #min_hessian_import = 400
-    #min_hessian_match = 400
-    #surf_import = cv2.SURF(min_hessian_import)
-    #surf_match = cv2.SURF(min_hessian_match)
+    # min_hessian_import = 400
+    # min_hessian_match = 400
+    # surf_import = cv2.SURF(min_hessian_import)
+    # surf_match = cv2.SURF(min_hessian_match)
 
     # BRISK detector
-    #extractor = cv2.DescriptorExtractor_create('BRISK')
-    #detector = cv2.BRISK(thresh=10, octaves=0)
+    # extractor = cv2.DescriptorExtractor_create('BRISK')
+    # detector = cv2.BRISK(thresh=10, octaves=0)
 
     extractor = cv2.SURF(1500, 4, 2, False)
     detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
@@ -78,10 +148,10 @@ def init_database():
 
     app.config["MONGODB_SETTINGS"] = {
         'db': "imagematcher",
-        'host': os.environ['OPENSHIFT_MONGODB_DB_HOST'],
-        'port': int(os.environ['OPENSHIFT_MONGODB_DB_PORT']),
-        'username': os.environ['OPENSHIFT_MONGODB_DB_USERNAME'],
-        'password': os.environ['OPENSHIFT_MONGODB_DB_PASSWORD']
+        'host': os.environ.get('OPENSHIFT_MONGODB_DB_HOST', ''),
+        'port': int(os.environ.get('OPENSHIFT_MONGODB_DB_PORT', 0)),
+        'username': os.environ.get('OPENSHIFT_MONGODB_DB_USERNAME', ''),
+        'password': os.environ.get('OPENSHIFT_MONGODB_DB_PASSWORD', '')
     }
     return MongoEngine(app)
 
@@ -185,8 +255,12 @@ def import_image(file):
     ref_image.save()
 
     # Keep the important bits in memory
-    ocv_ref_image = [kp, des, ref_image.id, width, height]
-    train_matcher(ocv_ref_image, des)
+    ocv_description = ref_image.to_opencv_description()
+    train_matcher(ocv_description, ocv_description[1])
+
+    # ocv_ref_image = [kp, des, ref_image.id, width, height]
+    # train_matcher(ocv_ref_image, des)
+    return ref_image
 
 
 def transform_ref_image(mat, w_ref, h_ref):
@@ -200,7 +274,8 @@ def transform_ref_image(mat, w_ref, h_ref):
 
 
 def normalize(points, w, h):
-    scale_point = lambda pt: [pt[0] / w, pt[1] / h]
+    def scale_point(pt):
+        return [pt[0] / w, pt[1] / h]
     return map(scale_point, points)
 
 
@@ -210,12 +285,13 @@ def score_transformation(mat, w_ref, h_ref):
     print dst
 
     # Compute vectors
-    diff_vec = lambda ia, ib:\
-        [dst[ib][0] - dst[ia][0], dst[ib][1] - dst[ia][1]]
+    def diff_vec(ia, ib):
+        return [dst[ib][0] - dst[ia][0], dst[ib][1] - dst[ia][1]]
     lines = [diff_vec(1, 0), diff_vec(2, 1), diff_vec(3, 2), diff_vec(0, 3)]
 
     # First, make sure the points are ordered clockwise or anti-clockwise
-    cross_pdt = lambda u, v: u[0] * v[1] - u[1] * v[0]
+    def cross_pdt(u, v):
+        return u[0] * v[1] - u[1] * v[0]
     pdts = [cross_pdt(lines[1], lines[0]), cross_pdt(lines[2], lines[1]), cross_pdt(lines[3], lines[2]), cross_pdt(lines[0], lines[3])]
 
     cur_sign = pdts[0]
@@ -227,7 +303,8 @@ def score_transformation(mat, w_ref, h_ref):
     area = (abs(pdts[0]) + abs(pdts[2])) / 2.0
 
     # evaluate perspective
-    vec_len = lambda v: math.sqrt(v[0] * v[0] + v[1] * v[1])
+    def vec_len(v):
+        return math.sqrt(v[0] * v[0] + v[1] * v[1])
     vec_lengths = map(vec_len, lines)
     per_1 = vec_lengths[0] / vec_lengths[2]
     per_2 = vec_lengths[1] / vec_lengths[3]
@@ -247,7 +324,7 @@ def score_transformation(mat, w_ref, h_ref):
 
 
 @timeit
-def match_images(kp_img, des_img):
+def match_images(kp_img, des_img, max_number_of_matches):
     matches = matcher.knnMatch(des_img, k=2)
 
     # Filter matches which are more than 3 times further than the min
@@ -277,10 +354,12 @@ def match_images(kp_img, des_img):
 
     #print grouped_matches
 
-    currentId = None
-    currentMat = None
-    currentArea = 0.0
-    currentScore = 0.0
+    # currentId = None
+    # currentMat = None
+    # currentArea = 0.0
+    # currentScore = 0.0
+
+    found_matches = []
 
     # Iterate over each reference image
     for k, ref_matches in grouped_matches.iteritems():
@@ -290,30 +369,20 @@ def match_images(kp_img, des_img):
 
             if mat is not None:
                 score, area = score_transformation(mat, ref_image[3], ref_image[4])
+                found_matches.append((score, area, ref_image[2], mat))
 
-                if score > currentScore:
-                    currentMat = mat
-                    currentId = ref_image[2]
-                    currentArea = area
-                    currentScore = score
+                #if score > currentScore:
+                #    currentMat = mat
+                #    currentId = ref_image[2]
+                #    currentArea = area
+                #    currentScore = score
 
-    # good_matches = []
-    # for m, n in matches:
-    #    if m.distance < 0.7*n.distance:
-    #        good_matches.append(m)
-    #        print m.imgIdx
+    sorted_matches = sorted(found_matches, key=itemgetter(0))
+    sorted_matches = sorted_matches[:max_number_of_matches]
 
-    # if len(good_matches) < MIN_MATCH_COUNT:
-    #    return None
+    return sorted_matches
 
-    # Get the keypoints from the matches
-    # match_kp_img = np.float32([kp_img[m.queryIdx].pt for m in good_matches]).reshape(-1,1,2)
-    # match_kp_ref = np.float32([kp_ref[m.trainIdx].pt for m in good_matches]).reshape(-1,1,2)
-
-    # Find transformation
-    # mat, mask = cv2.findHomography(match_kp_img, match_kp_ref, cv2.RANSAC, 5.0)
-
-    return currentId, currentMat, currentArea, currentScore
+    # return currentId, currentMat, currentArea, currentScore
 
 
 def find_transformation(kp_img, ref_image, good_matches):
@@ -330,7 +399,7 @@ def find_transformation(kp_img, ref_image, good_matches):
 
 @app.route('/')
 def main_page():
-    return render_template('index2.html')
+    return render_template('index_polymer.html')
 
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -349,35 +418,49 @@ def upload_file():
 
 
 @timeit
-def process_image(file):
+def process_image(file, max_number_of_results):
     img = open_image(file, MAX_MATCH_IMAGE_SIZE)
     img_h, img_w = img.shape
 
     # find the keypoints and descriptors
     kp, des = detectAndComputeDescriptors(img)
 
-    currentId, currentMat, currentArea, currentScore = match_images(kp, des)
+    matches = match_images(kp, des, max_number_of_results)
+    # currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
-    if currentId is None:
+    if len(matches) == 0:
         return {"error": "No result"}, 404
     else:
-        ref_match = ReferenceImage.objects(id=currentId).first()
-        transformed = transform_ref_image(currentMat,
-                                          ref_match.width,
-                                          ref_match.height)
-        transformed_normalized = normalize(transformed, img_w, img_h)
-        thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
+        def details_to_results(details):
+            # Extract details for the list
+            currentScore = details[0]
+            currentArea = details[1]
+            currentId = details[2]
+            currentMat = details[3]
 
-        result = {"id": str(currentId),
-                  "metadata": ref_match.metadata,
-                  "area": currentArea,
-                  "score": currentScore,
-                  "transformed_normalized": transformed_normalized,
-                  "thumbnail_url": thumbnail_url}
+            print details
+            # Create a structure to be sent back as JSON
+            ref_match = ReferenceImage.objects(id=currentId).first()
+            transformed = transform_ref_image(currentMat,
+                                              ref_match.width,
+                                              ref_match.height)
+            transformed_normalized = normalize(transformed, img_w, img_h)
+            thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
 
-        music_file = ref_match.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            result["music_url"] = url_for('get_music_attachment', reference_image_id=currentId)
+            result = {"id": str(currentId),
+                      "metadata": ref_match.metadata,
+                      "area": currentArea,
+                      "score": currentScore,
+                      "transformed_normalized": transformed_normalized,
+                      "thumbnail_url": thumbnail_url}
+
+            music_file = ref_match.music_attachment
+            if music_file is not None and music_file.get() is not None:
+                result["music_url"] = url_for('get_music_attachment', reference_image_id=currentId)
+
+            return result
+
+        result = map(details_to_results, matches)
 
         return result, 200
 
@@ -397,32 +480,31 @@ def locate():
     if request.method == 'POST':
         file = request.files['file']
         if file:
-            result, status_code = process_image(file)
-            return make_response(jsonify(result), status_code)
+            result, status_code = process_image(file, 1)
+            if status_code == 200 and len(result) == 1:
+                return make_response(jsonify(result[0]), status_code)
+            else:
+                return make_response(jsonify(result), status_code)
         else:
             msg = "No input file to process"
 
     return render_template('locate.html', message=msg)
 
 
-@app.route('/references/', methods=['GET'])
-def list_reference_images():
-    images = []
+@app.route('/search', methods=['POST'])
+def search():
+    msg = None
+    file = request.files['file']
+    if file:
+        results, status_code = process_image(file, MAX_IMAGES_FOUND)
+        if status_code == 200:
+            return make_response(jsonify({"count": len(results), "results": results}), status_code)
+        else:
+            return make_response(jsonify(results), status_code)
+    else:
+        msg = "No input file to process"
 
-    for o in ReferenceImage.objects:
-        ref = {"id": str(o.id),
-               "metadata": o.metadata,
-               "thumbnail_url": url_for('get_thumbnail', reference_image_id=o.id),
-               }
-
-        music_file = o.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            ref["music_url"] = url_for('get_music_attachment', reference_image_id=o.id)
-
-        images.append(ref)
-
-    response = {"count": len(images), "images": images}
-    return jsonify(response)
+    return make_response(jsonify(msg), 500)
 
 
 @app.route('/references/<reference_image_id>/thumbnail', methods=['GET'])

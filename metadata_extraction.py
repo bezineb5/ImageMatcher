@@ -1,5 +1,6 @@
 import exifread
 from werkzeug.utils import secure_filename
+import os
 
 
 def compute_single_ratio(ratio):
@@ -39,7 +40,11 @@ def extract_metadata(file):
     if "Image ImageDescription" in tags:
         name = tags['Image ImageDescription'].values
     else:
-        name = secure_filename(file.filename)
+        name_with_ext = secure_filename(file.filename)
+        try:
+            name = os.path.splitext(os.path.basename(name_with_ext))[0]
+        except:
+            name = name_with_ext
 
     # GPS coordinates
     longitude = get_coordinate('GPS GPSLongitude', 'GPS GPSLongitudeRef', tags)

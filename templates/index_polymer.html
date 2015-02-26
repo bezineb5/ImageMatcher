@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+
+<head>
+
+  <title>ImageMatcher</title>
+
+     <style>
+       html, body {
+         display: block;
+         height: 100%;
+         font-family: 'RobotoDraft', sans-serif;
+       }
+     </style>
+
+  <meta name="viewport"
+    content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+
+  <script src="{{url_for('static', filename='bower_components/webcomponentsjs/webcomponents.js')}}"></script>
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/font-roboto/roboto.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-toolbar/core-toolbar.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-menu/core-menu.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-item/core-item.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-header-panel/core-header-panel.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-drawer-panel/core-drawer-panel.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-scaffold/core-scaffold.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-list/core-list.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-ajax/core-ajax.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-image/core-image.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-scroll-header-panel/core-scroll-header-panel.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-ajax/core-xhr.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-scroll-header-panel/core-scroll-header-panel.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/core-icons/core-icons.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/paper-fab/paper-fab.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/paper-dialog/paper-action-dialog.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/paper-button/paper-button.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='components/image-card.html')}}">
+
+  <link rel="import" href="{{url_for('static', filename='bower_components/aha-table/dist/aha-table.html')}}">
+
+</head>
+{% raw %}
+<body unresolved fullbleed vertical layout>
+  <core-ajax
+      auto
+      url='api/1.0/references/'
+      handleAs="json"
+      on-core-response="{{handleResponse}}"></core-ajax>
+  <core-xhr id="xhr"></core-xhr>
+
+  <core-header-panel id="hPanel" flex>
+    <core-toolbar >
+      <template id="toolbar-template" is="auto-binding">
+        <div flex></div>
+        <core-icon-button icon="search" on-tap="{{tapSearchHandler}}"></core-icon-button>
+        <core-icon-button icon="add" on-tap="{{tapAddHandler}}"></core-icon-button>
+        <div class="bottom indent title">ImageMatcher</div>
+      </template>
+    </core-toolbar>
+      <core-list id="images-list" flex height="30" width="400" grid>
+        <template>
+          <image-card>
+            <core-image sizing="cover" width="70" height="70" src="{{model.thumbnail_url}}" style="background:white" preload></core-image>
+            <h2>{{model.metadata.name}}</h2>
+            <p>
+              <a href="/references/{{model.id}}/music/upload">Music</a>
+              <audio controls="controls" preload="none">
+                Your browser does not support the <code>audio</code> element.
+                <source src="{{model.music_url}}">
+              </audio>
+            </p>
+          </image-card>
+        </template>
+      </core-list>
+  </core-header-panel>
+
+  <paper-action-dialog id="details-dialog" transition="core-transition-left">
+    <template is="auto-binding" id="details-template">
+      <h2>{{data.metadata.name}}</h2>
+      <core-image sizing="contain" width="300" height="300" src="{{data.thumbnail_url}}" style="background:white" preload></core-image>
+      <aha-table id="meta-table">
+        <aha-column name="key" 
+            type="string" 
+            sortable
+            searchable
+            required
+            placeholder="Empty Field Placeholder Text" 
+            default="" 
+            hint="a hint in column header">
+        </aha-column>
+        <aha-column name="value" 
+            type="string" 
+            sortable
+            searchable
+            required
+            placeholder="Empty Field Placeholder Text" 
+            default="" 
+            hint="a hint in column header">
+        </aha-column>
+      </aha-table>
+
+      <paper-button dismissive autofocus>Close</paper-button>
+      <paper-button affirmative on-tap="{{handleDelete}}">Delete</paper-button>
+    </template>
+
+  </paper-action-dialog>
+
+  <paper-action-dialog id="import-dialog" transition="core-transition-left">
+    <template is="auto-binding" id="import-template">
+      <h2>Import new image</h2>
+      <form action="" method=post enctype="multipart/form-data">
+        <p>
+          <label for="imageFile">Select an image</label><br />
+          <input type="file" id="imageFile" name="image"><br/>
+          <label for="imageFile">Select a music (optional)</label><br />
+          <input type="file" id="musicFile" name="musicFile"><br/>
+          <paper-button on-tap="{{handleUploadImage}}">Save</paper-button>
+        </p>
+      </form>
+    </template>
+  </paper-action-dialog>
+
+  <script>
+    document.addEventListener('polymer-ready', function() {
+      var xhr = document.querySelector("#xhr");
+
+      var ajax = document.querySelector("core-ajax");
+      ajax.addEventListener("core-response", 
+        function(e) {
+          document.querySelector('#images-list').data = e.detail.response.images;
+        }
+      );
+
+      var listScope = document.querySelector('#images-list');
+      listScope.scrollTarget = document.querySelector('#hPanel').scroller;
+      listScope.addEventListener("core-activate", function(e) {
+        var refImage = e.detail.data;
+        showDetails(refImage);
+      });
+
+      var detailsScope = document.querySelector('#details-template');
+      detailsScope.handleDelete = function(e) {
+        var refImage = this.data;
+        xhr.request({url: "api/1.0/references/" + refImage.id, method: "DELETE", callback: function(d) { console.log("Deleted: " + d); }});
+      };
+
+      var showDetails = function(refImage) {
+        detailsScope.data = refImage;
+        var table = [];
+        for(var k in refImage.metadata) {
+          table.push({
+            key: k,
+            value: refImage.metadata[k]
+          });
+        }
+        document.getElementById('meta-table').data = table;
+        document.querySelector('#details-dialog').open();
+      };
+
+      var toolbarScope = document.getElementById('toolbar-template');
+      toolbarScope.tapAddHandler = function(e) {
+        document.querySelector('#import-dialog').open();
+      }
+
+      var importScope = document.querySelector('#import-template');
+      importScope.handleUploadImage = function(e) {
+        if (this.$.imageFile.files.length > 0) {
+          var formData = new FormData();
+          formData.append("image", this.$.imageFile.files[0]);
+          if (this.$.musicFile.files.length > 0)
+            formData.append("music", this.$.musicFile.files[0]);
+
+          xhr.request({url: "api/1.0/references/", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); }});
+          document.querySelector('#import-dialog').close();          
+        }
+      };
+
+    });
+  </script>
+
+</body>
+{% endraw %}
+</html>
