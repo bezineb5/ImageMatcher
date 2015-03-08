@@ -6,6 +6,7 @@ from flask.ext.mongoengine import MongoEngine
 from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, FileField
 import math
 from metadata_extraction import extract_metadata
+from image_helpers import generate_thumbnail
 from profiling import timeit
 import StringIO
 import os
@@ -25,8 +26,10 @@ MAX_REF_IMAGE_SIZE = 512
 MAX_MATCH_IMAGE_SIZE = 1024
 MAX_IMAGES_FOUND = 5
 
+THUMBNAIL_SIZE = 800, 600
+
 # ORB maximum number of features returned
-ORB_MAX_FEATURES = 100
+ORB_MAX_FEATURES = 250
 
 # In-memory cache
 ref_database = []
@@ -251,7 +254,8 @@ def import_image(file):
 
     # Save the thumbnail
     thumbnail = StringIO.StringIO()
-    thumbnail.write(np.array(cv2.imencode(".jpg", img)[1]).tostring())
+    generate_thumbnail(file, thumbnail, THUMBNAIL_SIZE)
+    #thumbnail.write(np.array(cv2.imencode(".jpg", img)[1]).tostring())
     thumbnail.seek(0)
 
     # Store the description of the image in the DB

@@ -7,5 +7,5 @@ Werkzeug>=0.9.4
 WTForms>=1.0.5
 ExifRead>=1.4.2
 uwsgi>=2.0.3
-Pillow>=2.4.0
+Pillow>=2.7.0
 flask-restful>=0.3.1
