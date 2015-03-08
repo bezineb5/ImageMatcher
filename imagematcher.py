@@ -31,8 +31,9 @@ ref_database = []
 
 class ReferenceImage(Document):
     keypoints = ListField(ListField(), required=True)
-    descriptors = ListField(ListField(FloatField()), required=True)
-    # descriptors = ListField(BinaryField(), required=True)
+    # SURF: descriptors = ListField(ListField(FloatField()), required=True)
+    # ORB
+    descriptors = ListField(ListField(IntField()), required=True)
     width = IntField(required=True)
     height = IntField(required=True)
     metadata = DynamicField()
@@ -41,9 +42,9 @@ class ReferenceImage(Document):
 
     def to_opencv_description(self):
         ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
-        ocv_des = np.array(self.descriptors, dtype=np.float32)
+        # SURF: ocv_des = np.array(self.descriptors, dtype=np.float32)
         # For BRISK descriptors
-        # ocv_des = np.asarray([np.fromstring(d, dtype=np.uint8) for d in self.descriptors])
+        ocv_des = np.array(self.descriptors, dtype=np.uint8)
         return [ocv_kp, ocv_des, self.id, self.width, self.height]
 
     def to_simple_object(self):
@@ -122,18 +123,25 @@ def init_opencv():
     # extractor = cv2.DescriptorExtractor_create('BRISK')
     # detector = cv2.BRISK(thresh=10, octaves=0)
 
-    extractor = cv2.SURF(1500, 4, 2, False)
-    detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
+    #extractor = cv2.SURF(1500, 4, 2, False)
+    #detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
+
+    # ORB detector
+    extractor = cv2.ORB()
+    detectors = [extractor, extractor]
 
     # FLANN parameters
     FLANN_INDEX_KDTREE = 1
     FLANN_INDEX_LSH = 6
 
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=4)
-    #index_params = dict(algorithm=FLANN_INDEX_LSH,
-    #                    table_number=8,  # 12
-    #                    key_size=30,     # 20
-    #                    multi_probe_level=2)  # 2
+    # For SURF
+    # index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=4)
+
+    # For ORB
+    index_params = dict(algorithm=FLANN_INDEX_LSH,
+                        table_number=6,  # 12
+                        key_size=12,     # 20
+                        multi_probe_level=1)  # 2
 
     search_params = dict(checks=50)   # or pass empty dictionary
 
