@@ -126,6 +126,21 @@
     </template>
   </paper-action-dialog>
 
+  <paper-action-dialog id="search-dialog" transition="core-transition-left">
+    <template is="auto-binding" id="search-template">
+      <h2>Search image</h2>
+      <form action="" method=post enctype="multipart/form-data">
+        <p>
+          <label for="imageFile">Select an image</label><br />
+          <input type="file" id="imageFile" name="image"><br/>
+          <paper-button on-tap="{{handleSearchImage}}">Search</paper-button>
+        </p>
+      </form>
+      <p>{{jsonResponse}}</p>
+    </template>
+  </paper-action-dialog>
+
+
   <script>
     document.addEventListener('polymer-ready', function() {
       var xhr = document.querySelector("#xhr");
@@ -168,6 +183,10 @@
         document.querySelector('#import-dialog').open();
       }
 
+      toolbarScope.tapSearchHandler = function(e) {
+        document.querySelector('#search-dialog').open();
+      }
+
       var importScope = document.querySelector('#import-template');
       importScope.handleUploadImage = function(e) {
         if (this.$.imageFile.files.length > 0) {
@@ -178,6 +197,16 @@
 
           xhr.request({url: "api/1.0/references/", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); }});
           document.querySelector('#import-dialog').close();          
+        }
+      };
+
+      var searchScope = document.querySelector('#search-template');
+      searchScope.handleSearchImage = function(e) {
+        if (this.$.imageFile.files.length > 0) {
+          var formData = new FormData();
+          formData.append("image", this.$.imageFile.files[0]);
+
+          xhr.request({url: "search", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); searchScope.jsonResponse = d; }});
         }
       };
 

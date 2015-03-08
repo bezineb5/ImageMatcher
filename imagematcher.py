@@ -385,7 +385,7 @@ def match_images(kp_img, des_img, max_number_of_matches):
                 #    currentArea = area
                 #    currentScore = score
 
-    sorted_matches = sorted(found_matches, key=itemgetter(0))
+    sorted_matches = sorted(found_matches, key=itemgetter(0), reverse=True)
     sorted_matches = sorted_matches[:max_number_of_matches]
 
     return sorted_matches
@@ -436,6 +436,8 @@ def process_image(file, max_number_of_results):
     matches = match_images(kp, des, max_number_of_results)
     # currentId, currentMat, currentArea, currentScore = match_images(kp, des)
 
+    print "Number of matches: ", str(len(matches))
+
     if len(matches) == 0:
         return {"error": "No result"}, 404
     else:
@@ -461,6 +463,8 @@ def process_image(file, max_number_of_results):
                       "score": currentScore,
                       "transformed_normalized": transformed_normalized,
                       "thumbnail_url": thumbnail_url}
+
+            print "Score for: ", ref_match.metadata['name'], " is: ", currentScore
 
             music_file = ref_match.music_attachment
             if music_file is not None and music_file.get() is not None:
@@ -502,7 +506,7 @@ def locate():
 @app.route('/search', methods=['POST'])
 def search():
     msg = None
-    file = request.files['file']
+    file = request.files['image']
     if file:
         results, status_code = process_image(file, MAX_IMAGES_FOUND)
         if status_code == 200:
