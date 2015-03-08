@@ -25,6 +25,9 @@ MAX_REF_IMAGE_SIZE = 512
 MAX_MATCH_IMAGE_SIZE = 1024
 MAX_IMAGES_FOUND = 5
 
+# ORB maximum number of features returned
+ORB_MAX_FEATURES = 100
+
 # In-memory cache
 ref_database = []
 
@@ -127,7 +130,7 @@ def init_opencv():
     #detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
 
     # ORB detector
-    extractor = cv2.ORB()
+    extractor = cv2.ORB(ORB_MAX_FEATURES)
     detectors = [extractor, extractor]
 
     # FLANN parameters
