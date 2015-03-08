@@ -332,7 +332,7 @@ def score_transformation(mat, w_ref, h_ref):
 
 
 @timeit
-def match_images(kp_img, des_img, max_number_of_matches):
+def match_images(kp_img, des_img, max_number_of_matches, min_score=0.0):
     matches = matcher.knnMatch(des_img, k=2)
 
     # Filter matches which are more than 3 times further than the min
@@ -377,13 +377,14 @@ def match_images(kp_img, des_img, max_number_of_matches):
 
             if mat is not None:
                 score, area = score_transformation(mat, ref_image[3], ref_image[4])
-                found_matches.append((score, area, ref_image[2], mat))
+                if score >= min_score:
+                    found_matches.append((score, area, ref_image[2], mat))
 
-                #if score > currentScore:
-                #    currentMat = mat
-                #    currentId = ref_image[2]
-                #    currentArea = area
-                #    currentScore = score
+                    #if score > currentScore:
+                    #    currentMat = mat
+                    #    currentId = ref_image[2]
+                    #    currentArea = area
+                    #    currentScore = score
 
     sorted_matches = sorted(found_matches, key=itemgetter(0), reverse=True)
     sorted_matches = sorted_matches[:max_number_of_matches]
@@ -426,17 +427,15 @@ def upload_file():
 
 
 @timeit
-def process_image(file, max_number_of_results):
+def process_image(file, max_number_of_results, min_score=0.0):
     img = open_image(file, MAX_MATCH_IMAGE_SIZE)
     img_h, img_w = img.shape
 
     # find the keypoints and descriptors
     kp, des = detectAndComputeDescriptors(img)
 
-    matches = match_images(kp, des, max_number_of_results)
+    matches = match_images(kp, des, max_number_of_results, min_score)
     # currentId, currentMat, currentArea, currentScore = match_images(kp, des)
-
-    print "Number of matches: ", str(len(matches))
 
     if len(matches) == 0:
         return {"error": "No result"}, 404
@@ -463,8 +462,6 @@ def process_image(file, max_number_of_results):
                       "score": currentScore,
                       "transformed_normalized": transformed_normalized,
                       "thumbnail_url": thumbnail_url}
-
-            print "Score for: ", ref_match.metadata['name'], " is: ", currentScore
 
             music_file = ref_match.music_attachment
             if music_file is not None and music_file.get() is not None:
@@ -507,8 +504,10 @@ def locate():
 def search():
     msg = None
     file = request.files['image']
+
     if file:
-        results, status_code = process_image(file, MAX_IMAGES_FOUND)
+        min_score = float(request.form.get('min_score', '0'))
+        results, status_code = process_image(file, MAX_IMAGES_FOUND, min_score)
         if status_code == 200:
             return make_response(jsonify({"count": len(results), "results": results}), status_code)
         else:

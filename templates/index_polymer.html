@@ -205,6 +205,7 @@
         if (this.$.imageFile.files.length > 0) {
           var formData = new FormData();
           formData.append("image", this.$.imageFile.files[0]);
+          formData.append("min_score", 0.5);
 
           xhr.request({url: "search", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); searchScope.jsonResponse = d; }});
         }
