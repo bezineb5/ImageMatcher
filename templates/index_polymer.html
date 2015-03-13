@@ -42,8 +42,7 @@
 
   <link rel="import" href="{{url_for('static', filename='components/image-card.html')}}">
 
-  <link rel="import" href="{{url_for('static', filename='bower_components/aha-table/dist/aha-table.html')}}">
-
+  <link rel="import" href="{{url_for('static', filename='bower_components/jsonymer/jsonymer-editor.html')}}">
 </head>
 {% raw %}
 <body unresolved fullbleed vertical layout>
@@ -63,18 +62,11 @@
         <div class="bottom indent title">ImageMatcher</div>
       </template>
     </core-toolbar>
-      <core-list id="images-list" flex height="30" width="400" grid>
+      <core-list id="images-list" flex height="30" width="420" grid>
         <template>
           <image-card>
-            <core-image sizing="cover" width="70" height="70" src="{{model.thumbnail_url}}" style="background:white" preload></core-image>
+            <core-image sizing="cover" src="{{model.thumbnail_url}}" preload></core-image>
             <h2>{{model.metadata.name}}</h2>
-            <p>
-              <a href="/references/{{model.id}}/music/upload">Music</a>
-              <audio controls="controls" preload="none">
-                Your browser does not support the <code>audio</code> element.
-                <source src="{{model.music_url}}">
-              </audio>
-            </p>
           </image-card>
         </template>
       </core-list>
@@ -83,30 +75,27 @@
   <paper-action-dialog id="details-dialog" transition="core-transition-left">
     <template is="auto-binding" id="details-template">
       <h2>{{data.metadata.name}}</h2>
-      <core-image sizing="contain" width="300" height="300" src="{{data.thumbnail_url}}" style="background:white" preload></core-image>
-      <aha-table id="meta-table">
-        <aha-column name="key" 
-            type="string" 
-            sortable
-            searchable
-            required
-            placeholder="Empty Field Placeholder Text" 
-            default="" 
-            hint="a hint in column header">
-        </aha-column>
-        <aha-column name="value" 
-            type="string" 
-            sortable
-            searchable
-            required
-            placeholder="Empty Field Placeholder Text" 
-            default="" 
-            hint="a hint in column header">
-        </aha-column>
-      </aha-table>
+      <div horizontal layout>
+        <div vertical layout>
+          <core-image sizing="contain" width="300" height="225" src="{{data.thumbnail_url}}" style="background:white" preload></core-image>
+          <label for="imageFile">Associate a music</label><br />
+          <form id="details-import-music-form">
+            <input type="file" id="musicFile" name="musicFile">
+          </form>
+
+          <template if="{{data.music_url}}">
+            <audio controls="controls" preload="none">
+              Your browser does not support the <code>audio</code> element.
+              <source src="{{data.music_url}}">
+            </audio>
+          </template>
+        </div>
+        <jsonymer-editor id="meta-json-editor"></jsonymer-editor>
+      </div>
 
       <paper-button dismissive autofocus>Close</paper-button>
       <paper-button affirmative on-tap="{{handleDelete}}">Delete</paper-button>
+      <paper-button affirmative on-tap="{{handleSave}}">Save</paper-button>
     </template>
 
   </paper-action-dialog>
@@ -162,30 +151,59 @@
       var detailsScope = document.querySelector('#details-template');
       detailsScope.handleDelete = function(e) {
         var refImage = this.data;
-        xhr.request({url: "api/1.0/references/" + refImage.id, method: "DELETE", callback: function(d) { console.log("Deleted: " + d); }});
+        xhr.request({url: "api/1.0/references/" + refImage.id, method: "DELETE",
+                    callback: function(d) {
+                      console.log("Deleted: " + d);
+                      ajax.go();
+                    }});
+      };
+
+      detailsScope.handleSave = function(e) {
+        var refImage = this.data;
+
+        // Upload music if provided
+        if (this.$.musicFile.files.length > 0) {
+          var formData = new FormData();
+          formData.append("music", this.$.musicFile.files[0]);
+
+          xhr.request({url: "api/1.0/references/" + refImage.id + "/music", method: "POST", body: formData,
+                      callback: function(d) {
+                        console.log("Uploaded music: " + d);
+                      }});
+        }
+
+        var newMeta = detailsScope.$['meta-json-editor'].toJSON(true, true);
+        xhr.request({url: "api/1.0/references/" + refImage.id + "/metadata",
+                    method: "PUT",
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newMeta),
+                    callback: function(d) {
+                      console.log("Saved: " + d);
+                      var newImage = JSON.parse(d);
+                      if (newImage != undefined) {
+                        refImage.metadata = newImage['metadata'];
+                        refImage.music_url = newImage['music_url'];
+                      }
+                    }
+                  });
       };
 
       var showDetails = function(refImage) {
         detailsScope.data = refImage;
-        var table = [];
-        for(var k in refImage.metadata) {
-          table.push({
-            key: k,
-            value: refImage.metadata[k]
-          });
-        }
-        document.getElementById('meta-table').data = table;
+        detailsScope.$['meta-json-editor'].obj = refImage.metadata;
+        detailsScope.$['details-import-music-form'].reset();
         document.querySelector('#details-dialog').open();
       };
 
       var toolbarScope = document.getElementById('toolbar-template');
+      var importDialog = document.querySelector('#import-dialog');
       toolbarScope.tapAddHandler = function(e) {
-        document.querySelector('#import-dialog').open();
-      }
+        importDialog.open();
+      };
 
       toolbarScope.tapSearchHandler = function(e) {
         document.querySelector('#search-dialog').open();
-      }
+      };
 
       var importScope = document.querySelector('#import-template');
       importScope.handleUploadImage = function(e) {
@@ -195,8 +213,12 @@
           if (this.$.musicFile.files.length > 0)
             formData.append("music", this.$.musicFile.files[0]);
 
-          xhr.request({url: "api/1.0/references/", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); }});
-          document.querySelector('#import-dialog').close();          
+          xhr.request({url: "api/1.0/references/", method: "POST", body: formData,
+                      callback: function(d) {
+                        console.log("Uploaded: " + d);
+                        ajax.go();
+                        importDialog.close();          
+                      }});
         }
       };
 
@@ -207,7 +229,11 @@
           formData.append("image", this.$.imageFile.files[0]);
           formData.append("min_score", 0.5);
 
-          xhr.request({url: "search", method: "POST", body: formData, callback: function(d) { console.log("Uploaded: " + d); searchScope.jsonResponse = d; }});
+          xhr.request({url: "api/1.0/search", method: "POST", body: formData,
+                      callback: function(d) {
+                        console.log("Searched: " + d);
+                        searchScope.jsonResponse = d;
+                      }});
         }
       };
 

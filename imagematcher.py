@@ -56,14 +56,14 @@ class ReferenceImage(Document):
     def to_simple_object(self):
         ref = {"id": str(self.id),
                "metadata": self.metadata,
-               "thumbnail_url": url_for('get_thumbnail',
-                                        reference_image_id=self.id),
+               "thumbnail_url": url_for('thumbnail',
+                                        ref_image_id=self.id),
                }
 
         music_file = self.music_attachment
         if music_file is not None and music_file.get() is not None:
-            ref["music_url"] = url_for('get_music_attachment',
-                                       reference_image_id=self.id)
+            ref["music_url"] = url_for('music',
+                                       ref_image_id=self.id)
 
         return ref
 
@@ -94,7 +94,7 @@ class ReferenceImageListAPI(restful.Resource):
 
             return ref_image.to_simple_object()
         else:
-            restful.abort(404, "Upload failed")
+            restful.abort(404, message="Upload failed")
 
 
 class ReferenceImageAPI(restful.Resource):
@@ -110,12 +110,104 @@ class ReferenceImageAPI(restful.Resource):
         pass
 
 
+class MetadataAPI(restful.Resource):
+    def get(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        return ref_image.metadata
+
+    def put(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        json = request.get_json(force=True, silent=True, cache=False)
+        print json
+        if ref_image is not None:
+            if json is not None:
+                ref_image.metadata = json
+                ref_image.save()
+                return ref_image.to_simple_object()
+            else:
+                restful.abort(500, message="Invalid metadata")
+        else:
+            restful.abort(404, message="Invalid image")
+
+
+class ThumbnailAPI(restful.Resource):
+    def get(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        thumbnail_file = ref_image.thumbnail
+        return send_file(thumbnail_file, mimetype=thumbnail_file.content_type)
+
+
+class MusicAPI(restful.Resource):
+    def get(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        music_file = ref_image.music_attachment
+        if music_file is not None and music_file.get() is not None:
+            return send_file(music_file, mimetype=music_file.content_type)
+        else:
+            restful.abort(404, message="No music attached")
+
+    def post(self, ref_image_id):
+        self.delete(ref_image_id)
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        music_file = request.files['music']
+        if music_file:
+            import_music(ref_image, music_file)
+            ref_image.save()
+            return ref_image.to_simple_object()
+        else:
+            restful.abort(404, message="Upload failed")
+
+    def put(self, ref_image_id):
+        self.post(ref_image_id)
+
+    def delete(self, ref_image_id):
+        ref_image = ReferenceImage.objects(id=ref_image_id).first()
+        if ref_image is not None:
+            music_file = ref_image.music_attachment
+            if music_file is not None and music_file.get() is not None:
+                ref_image.music_attachment = None
+                music_file.delete()
+                self.save()
+        pass
+
+
+class SearchAPI(restful.Resource):
+    def post(self):
+        status_code = 500
+        error_data = None
+        image_file = request.files['image']
+
+        if image_file:
+            min_score = float(request.form.get('min_score', '0'))
+            results, status_code = process_image(image_file, MAX_IMAGES_FOUND, min_score)
+            if status_code == 200:
+                return {"count": len(results), "results": results}
+            else:
+                error_data = results
+        else:
+            error_data = "No input file to process"
+
+        restful.abort(status_code, message=error_data)
+
+
 api.add_resource(ReferenceImageListAPI,
                  '/api/1.0/references/',
                  endpoint='reference_image_list')
 api.add_resource(ReferenceImageAPI,
                  '/api/1.0/references/<string:ref_image_id>',
                  endpoint='reference_image')
+api.add_resource(MetadataAPI,
+                 '/api/1.0/references/<string:ref_image_id>/metadata',
+                 endpoint='metadata')
+api.add_resource(ThumbnailAPI,
+                 '/api/1.0/references/<string:ref_image_id>/thumbnail',
+                 endpoint='thumbnail')
+api.add_resource(MusicAPI,
+                 '/api/1.0/references/<string:ref_image_id>/music',
+                 endpoint='music')
+api.add_resource(SearchAPI,
+                 '/api/1.0/search',
+                 endpoint='search')
 
 
 def init_opencv():
@@ -461,18 +553,11 @@ def process_image(file, max_number_of_results, min_score=0.0):
                                               ref_match.width,
                                               ref_match.height)
             transformed_normalized = normalize(transformed, img_w, img_h)
-            thumbnail_url = url_for('get_thumbnail', reference_image_id=currentId)
 
-            result = {"id": str(currentId),
-                      "metadata": ref_match.metadata,
-                      "area": currentArea,
-                      "score": currentScore,
-                      "transformed_normalized": transformed_normalized,
-                      "thumbnail_url": thumbnail_url}
-
-            music_file = ref_match.music_attachment
-            if music_file is not None and music_file.get() is not None:
-                result["music_url"] = url_for('get_music_attachment', reference_image_id=currentId)
+            result = ref_match.to_simple_object()
+            result['area'] = currentArea
+            result['score'] = currentScore
+            result['transformed_normalized'] = transformed_normalized
 
             return result
 
@@ -505,38 +590,6 @@ def locate():
             msg = "No input file to process"
 
     return render_template('locate.html', message=msg)
-
-
-@app.route('/search', methods=['POST'])
-def search():
-    msg = None
-    file = request.files['image']
-
-    if file:
-        min_score = float(request.form.get('min_score', '0'))
-        results, status_code = process_image(file, MAX_IMAGES_FOUND, min_score)
-        if status_code == 200:
-            return make_response(jsonify({"count": len(results), "results": results}), status_code)
-        else:
-            return make_response(jsonify(results), status_code)
-    else:
-        msg = "No input file to process"
-
-    return make_response(jsonify(msg), 500)
-
-
-@app.route('/references/<reference_image_id>/thumbnail', methods=['GET'])
-def get_thumbnail(reference_image_id):
-    ref_image = ReferenceImage.objects(id=reference_image_id).first()
-    thumbnail_file = ref_image.thumbnail
-    return send_file(thumbnail_file, mimetype=thumbnail_file.content_type)
-
-
-@app.route('/match', methods=['POST'])
-def match():
-    content = request.json
-    print content
-    return None
 
 
 @app.route('/clear_db', methods=['GET'])
