@@ -5,13 +5,13 @@
 
   <title>ImageMatcher</title>
 
-    <style>
-      html, body {
-        display: block;
-        height: 100%;
-        font-family: 'RobotoDraft', sans-serif;
-      }
-    </style>
+  <style>
+    html, body {
+      display: block;
+      height: 100%;
+      font-family: 'RobotoDraft', sans-serif;
+    }
+  </style>
 
   <meta name="viewport"
     content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
@@ -58,7 +58,6 @@
       <template id="toolbar-template" is="auto-binding">
         <div flex></div>
         <core-icon-button icon="search" on-tap="{{tapSearchHandler}}"></core-icon-button>
-        <core-icon-button icon="add" on-tap="{{tapAddHandler}}"></core-icon-button>
         <div class="bottom indent title">ImageMatcher</div>
       </template>
     </core-toolbar>
@@ -72,13 +71,23 @@
       </core-list>
   </core-header-panel>
 
+  <template id="fab-menu-template" is="auto-binding">
+    <paper-fab icon="add" style="position: absolute; bottom: 23px; right: 23px;" on-tap="{{tapAddHandler}}"></paper-fab>
+  </template>
+
   <paper-action-dialog id="details-dialog" transition="core-transition-left">
     <template is="auto-binding" id="details-template">
+      <style shim-shadowdom>
+        paper-button.warning {
+          color: #FF0000;
+        }
+      </style>
+
       <h2>{{data.metadata.name}}</h2>
       <div horizontal layout>
         <div vertical layout style="margin-right: 10px;">
           <core-image sizing="contain" width="300" height="225" src="{{data.thumbnail_url}}" style="background:white" preload></core-image>
-          <label for="imageFile">Associate a music</label><br />
+          <label for="imageFile">Associate a music</label>
           <form id="details-import-music-form">
             <input type="file" id="musicFile" name="musicFile">
           </form>
@@ -96,7 +105,7 @@
       </div>
 
       <paper-button dismissive autofocus>Close</paper-button>
-      <paper-button affirmative on-tap="{{handleDelete}}">Delete</paper-button>
+      <paper-button affirmative class="warning" on-tap="{{handleDelete}}">Delete</paper-button>
       <paper-button affirmative raised on-tap="{{handleSave}}">Save</paper-button>
     </template>
 
@@ -106,13 +115,15 @@
     <template is="auto-binding" id="import-template">
       <h2>Import new image</h2>
       <form action="" method=post enctype="multipart/form-data">
-        <label for="imageFile">Select an image</label><br />
-        <input type="file" id="imageFile" name="image"><br/>
-        <label for="imageFile">Select a music (optional)</label><br />
-        <input type="file" id="musicFile" name="musicFile"><br/>
+        <div vertical layout>
+          <label for="imageFile">Select an image</label>
+          <input type="file" id="imageFile" name="image">
+          <label for="imageFile">Select a music (optional)</label>
+          <input type="file" id="musicFile" name="musicFile">
+        </div>
       </form>
       <paper-button dismissive autofocus>Cancel</paper-button>
-      <paper-button affirmative raised autofocus on-tap="{{handleUploadImage}}">Save</paper-button>
+      <paper-button affirmative raised autofocus on-tap="{{handleUploadImage}}">Import</paper-button>
     </template>
   </paper-action-dialog>
 
@@ -195,8 +206,10 @@
       };
 
       var toolbarScope = document.getElementById('toolbar-template');
+      var fabMenuScope = document.getElementById('fab-menu-template');
+
       var importDialog = document.querySelector('#import-dialog');
-      toolbarScope.tapAddHandler = function(e) {
+      fabMenuScope.tapAddHandler = function(e) {
         importDialog.open();
       };
 

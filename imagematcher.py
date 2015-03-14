@@ -605,30 +605,6 @@ def clear_db():
     return "Database cleared"
 
 
-@app.route('/references/<reference_image_id>/music', methods=['GET', 'PUT', 'POST'])
-def get_music_attachment(reference_image_id):
-    ref_image = ReferenceImage.objects(id=reference_image_id).first()
-
-    if request.method == 'POST' or request.method == 'PUT':
-        # Music attached to the image
-        music_file = request.files['musicFile']
-        import_music(ref_image, music_file)
-        ref_image.save()
-        return make_response(jsonify({"success": True}), 200)
-    elif request.method == 'GET':
-        music_file = ref_image.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            return send_file(music_file, mimetype=music_file.content_type)
-        else:
-            return make_response(jsonify({"error": "No music"}), 404)
-
-
-@app.route('/references/<reference_image_id>/music/upload', methods=['GET'])
-def upload_music_page(reference_image_id):
-    msg = None
-    return render_template('upload_music.html', message=msg, ref_id=reference_image_id)
-
-
 # Initialization
 detectors, extractor, matcher = init_opencv()
 db = init_database()
