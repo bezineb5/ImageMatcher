@@ -5,13 +5,13 @@
 
   <title>ImageMatcher</title>
 
-     <style>
-       html, body {
-         display: block;
-         height: 100%;
-         font-family: 'RobotoDraft', sans-serif;
-       }
-     </style>
+    <style>
+      html, body {
+        display: block;
+        height: 100%;
+        font-family: 'RobotoDraft', sans-serif;
+      }
+    </style>
 
   <meta name="viewport"
     content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
@@ -76,7 +76,7 @@
     <template is="auto-binding" id="details-template">
       <h2>{{data.metadata.name}}</h2>
       <div horizontal layout>
-        <div vertical layout>
+        <div vertical layout style="margin-right: 10px;">
           <core-image sizing="contain" width="300" height="225" src="{{data.thumbnail_url}}" style="background:white" preload></core-image>
           <label for="imageFile">Associate a music</label><br />
           <form id="details-import-music-form">
@@ -90,12 +90,14 @@
             </audio>
           </template>
         </div>
-        <jsonymer-editor id="meta-json-editor"></jsonymer-editor>
+        <div vertical layout>
+          <jsonymer-editor id="meta-json-editor"></jsonymer-editor>
+        </div>
       </div>
 
       <paper-button dismissive autofocus>Close</paper-button>
       <paper-button affirmative on-tap="{{handleDelete}}">Delete</paper-button>
-      <paper-button affirmative on-tap="{{handleSave}}">Save</paper-button>
+      <paper-button affirmative raised on-tap="{{handleSave}}">Save</paper-button>
     </template>
 
   </paper-action-dialog>
@@ -104,14 +106,13 @@
     <template is="auto-binding" id="import-template">
       <h2>Import new image</h2>
       <form action="" method=post enctype="multipart/form-data">
-        <p>
-          <label for="imageFile">Select an image</label><br />
-          <input type="file" id="imageFile" name="image"><br/>
-          <label for="imageFile">Select a music (optional)</label><br />
-          <input type="file" id="musicFile" name="musicFile"><br/>
-          <paper-button on-tap="{{handleUploadImage}}">Save</paper-button>
-        </p>
+        <label for="imageFile">Select an image</label><br />
+        <input type="file" id="imageFile" name="image"><br/>
+        <label for="imageFile">Select a music (optional)</label><br />
+        <input type="file" id="musicFile" name="musicFile"><br/>
       </form>
+      <paper-button dismissive autofocus>Cancel</paper-button>
+      <paper-button affirmative raised autofocus on-tap="{{handleUploadImage}}">Save</paper-button>
     </template>
   </paper-action-dialog>
 
@@ -119,13 +120,11 @@
     <template is="auto-binding" id="search-template">
       <h2>Search image</h2>
       <form action="" method=post enctype="multipart/form-data">
-        <p>
-          <label for="imageFile">Select an image</label><br />
-          <input type="file" id="imageFile" name="image"><br/>
-          <paper-button on-tap="{{handleSearchImage}}">Search</paper-button>
-        </p>
+        <label for="imageFile">Select an image</label><br />
+        <input type="file" id="imageFile" name="image" on-change="{{handleSearchImage}}"><br/>
       </form>
       <p>{{jsonResponse}}</p>
+      <paper-button dismissive autofocus>Close</paper-button>
     </template>
   </paper-action-dialog>
 
@@ -234,6 +233,8 @@
                         console.log("Searched: " + d);
                         searchScope.jsonResponse = d;
                       }});
+
+          return false;
         }
       };
 
