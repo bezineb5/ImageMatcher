@@ -43,6 +43,7 @@
   <link rel="import" href="{{url_for('static', filename='components/image-card.html')}}">
 
   <link rel="import" href="{{url_for('static', filename='bower_components/jsonymer/jsonymer-editor.html')}}">
+  <link rel="import" href="{{url_for('static', filename='bower_components/prism-js/prism-js.html')}}">
 </head>
 {% raw %}
 <body unresolved fullbleed vertical layout>
@@ -58,6 +59,7 @@
       <template id="toolbar-template" is="auto-binding">
         <div flex></div>
         <core-icon-button icon="search" on-tap="{{tapSearchHandler}}"></core-icon-button>
+        <core-icon-button icon="refresh" on-tap="{{tapRefreshHandler}}"></core-icon-button>
         <div class="bottom indent title">ImageMatcher</div>
       </template>
     </core-toolbar>
@@ -134,7 +136,7 @@
         <label for="imageFile">Select an image</label><br />
         <input type="file" id="imageFile" name="image" on-change="{{handleSearchImage}}"><br/>
       </form>
-      <p>{{jsonResponse}}</p>
+      <prism-js language="javascript" inputValue="{{jsonResponse}}"></prism-js>
       <paper-button dismissive autofocus>Close</paper-button>
     </template>
   </paper-action-dialog>
@@ -213,8 +215,14 @@
         importDialog.open();
       };
 
+      var searchDialog = document.querySelector('#search-dialog');
+
       toolbarScope.tapSearchHandler = function(e) {
-        document.querySelector('#search-dialog').open();
+        searchDialog.open();
+      };
+
+      toolbarScope.tapRefreshHandler = function(e) {
+        ajax.go();
       };
 
       var importScope = document.querySelector('#import-template');
@@ -245,9 +253,8 @@
                       callback: function(d) {
                         console.log("Searched: " + d);
                         searchScope.jsonResponse = d;
+                        searchDialog.updateTargetDimensions();
                       }});
-
-          return false;
         }
       };
 

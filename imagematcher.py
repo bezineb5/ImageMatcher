@@ -1,16 +1,22 @@
-from flask import Flask, request, render_template, jsonify, url_for, send_file, make_response
+from flask import Flask, request, render_template, jsonify, send_file, make_response
 import cv2
 import numpy as np
 from flask.ext import restful
 from flask.ext.mongoengine import MongoEngine
-from mongoengine import ListField, IntField, FloatField, Document, DynamicField, ImageField, FileField
 import math
-from metadata_extraction import extract_metadata
-from image_helpers import generate_thumbnail
+from common.metadata_extraction import extract_metadata
+from common.image_helpers import generate_thumbnail
+from common import dbcache
 from profiling import timeit
 import StringIO
 import os
 from operator import itemgetter
+from models.referenceimage import ReferenceImage
+from resources.thumbnail import ThumbnailAPI
+from resources.metadata import MetadataAPI
+from resources.referenceimage import ReferenceImageAPI
+from resources.music import MusicAPI, import_music
+
 
 # Flask application
 app = Flask(__name__)
@@ -31,52 +37,6 @@ THUMBNAIL_SIZE = 800, 600
 # ORB maximum number of features returned
 ORB_MAX_FEATURES = 250
 
-# In-memory cache
-ref_database = []
-
-
-class ReferenceImage(Document):
-    keypoints = ListField(ListField(), required=True)
-    # SURF: descriptors = ListField(ListField(FloatField()), required=True)
-    # ORB
-    descriptors = ListField(ListField(IntField()), required=True)
-    width = IntField(required=True)
-    height = IntField(required=True)
-    metadata = DynamicField()
-    thumbnail = ImageField(size=(800, 600, True), collection_name='reference_thumbnails')
-    music_attachment = FileField(collection_name='music_attachments')
-
-    def to_opencv_description(self):
-        ocv_kp = [cv2.KeyPoint(o[0], o[1], o[2]) for o in self.keypoints]
-        # SURF: ocv_des = np.array(self.descriptors, dtype=np.float32)
-        # For BRISK descriptors
-        ocv_des = np.array(self.descriptors, dtype=np.uint8)
-        return [ocv_kp, ocv_des, self.id, self.width, self.height]
-
-    def to_simple_object(self):
-        ref = {"id": str(self.id),
-               "metadata": self.metadata,
-               "thumbnail_url": url_for('thumbnail',
-                                        ref_image_id=self.id),
-               }
-
-        music_file = self.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            ref["music_url"] = url_for('music',
-                                       ref_image_id=self.id)
-
-        return ref
-
-    def delete_attachments(self):
-        if self.thumbnail is not None:
-            self.thumbnail.delete()
-            self.thumbnail = None
-        music_file = self.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            self.music_attachment = None
-            music_file.delete()
-        self.save()
-
 
 class ReferenceImageListAPI(restful.Resource):
     def get(self):
@@ -96,78 +56,16 @@ class ReferenceImageListAPI(restful.Resource):
         else:
             restful.abort(404, message="Upload failed")
 
+    def delete(self):
+        # Empty the database
+        for o in ReferenceImage.objects:
+            o.delete()
 
-class ReferenceImageAPI(restful.Resource):
-    def get(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        return ref_image.to_simple_object()
+        # Clear the memory cache
+        dbcache.clear()
+        detectors, extractor, matcher = init_opencv()
 
-    def delete(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        if ref_image is not None:
-            ref_image.delete_attachments()
-            ref_image.delete()
-        pass
-
-
-class MetadataAPI(restful.Resource):
-    def get(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        return ref_image.metadata
-
-    def put(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        json = request.get_json(force=True, silent=True, cache=False)
-        print json
-        if ref_image is not None:
-            if json is not None:
-                ref_image.metadata = json
-                ref_image.save()
-                return ref_image.to_simple_object()
-            else:
-                restful.abort(500, message="Invalid metadata")
-        else:
-            restful.abort(404, message="Invalid image")
-
-
-class ThumbnailAPI(restful.Resource):
-    def get(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        thumbnail_file = ref_image.thumbnail
-        return send_file(thumbnail_file, mimetype=thumbnail_file.content_type)
-
-
-class MusicAPI(restful.Resource):
-    def get(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        music_file = ref_image.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            return send_file(music_file, mimetype=music_file.content_type)
-        else:
-            restful.abort(404, message="No music attached")
-
-    def post(self, ref_image_id):
-        self.delete(ref_image_id)
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        music_file = request.files['music']
-        if music_file:
-            import_music(ref_image, music_file)
-            ref_image.save()
-            return ref_image.to_simple_object()
-        else:
-            restful.abort(404, message="Upload failed")
-
-    def put(self, ref_image_id):
-        self.post(ref_image_id)
-
-    def delete(self, ref_image_id):
-        ref_image = ReferenceImage.objects(id=ref_image_id).first()
-        if ref_image is not None:
-            music_file = ref_image.music_attachment
-            if music_file is not None and music_file.get() is not None:
-                ref_image.music_attachment = None
-                music_file.delete()
-                self.save()
+        print "Database cleared"
         pass
 
 
@@ -221,15 +119,15 @@ def init_opencv():
     # extractor = cv2.DescriptorExtractor_create('BRISK')
     # detector = cv2.BRISK(thresh=10, octaves=0)
 
-    #extractor = cv2.SURF(1500, 4, 2, False)
-    #detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
+    # extractor = cv2.SURF(1500, 4, 2, False)
+    # detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
 
     # ORB detector
     extractor = cv2.ORB(ORB_MAX_FEATURES)
     detectors = [extractor, extractor]
 
     # FLANN parameters
-    FLANN_INDEX_KDTREE = 1
+    # FLANN_INDEX_KDTREE = 1
     FLANN_INDEX_LSH = 6
 
     # For SURF
@@ -244,8 +142,8 @@ def init_opencv():
     search_params = dict(checks=50)   # or pass empty dictionary
 
     flann = cv2.FlannBasedMatcher(index_params, search_params)
-    #flann = cv2.BFMatcher()
-    #flann = indexed_descriptors.Matcher()
+    # flann = cv2.BFMatcher()
+    # flann = indexed_descriptors.Matcher()
 
     return detectors, extractor, flann
 
@@ -263,12 +161,12 @@ def init_database():
 
 
 def train_matcher(ref_image, descriptors):
-    ref_database.append(ref_image)
+    dbcache.add(ref_image)
     matcher.add([descriptors])
 
 
 def load_db_in_memory():
-    ref_database = []
+    dbcache.clear()
     for o in ReferenceImage.objects:
         ref_image = o.to_opencv_description()
         train_matcher(ref_image, ref_image[1])
@@ -459,31 +357,18 @@ def match_images(kp_img, des_img, max_number_of_matches, min_score=0.0):
         elif l == 1:
             append_match(m[0])
 
-    #print grouped_matches
-
-    # currentId = None
-    # currentMat = None
-    # currentArea = 0.0
-    # currentScore = 0.0
-
     found_matches = []
 
     # Iterate over each reference image
     for k, ref_matches in grouped_matches.iteritems():
         if len(ref_matches) > MIN_MATCH_COUNT:
-            ref_image = ref_database[k]
+            ref_image = dbcache.get(k)
             mat = find_transformation(kp_img, ref_image, ref_matches)
 
             if mat is not None:
                 score, area = score_transformation(mat, ref_image[3], ref_image[4])
                 if score >= min_score:
                     found_matches.append((score, area, ref_image[2], mat))
-
-                    #if score > currentScore:
-                    #    currentMat = mat
-                    #    currentId = ref_image[2]
-                    #    currentArea = area
-                    #    currentScore = score
 
     sorted_matches = sorted(found_matches, key=itemgetter(0), reverse=True)
     sorted_matches = sorted_matches[:max_number_of_matches]
@@ -566,49 +451,9 @@ def process_image(file, max_number_of_results, min_score=0.0):
         return result, 200
 
 
-def import_music(ref_image, file):
-    if file is not None:
-        music_file = ref_image.music_attachment
-        if music_file is not None and music_file.get() is not None:
-            music_file.delete()
-
-        music_file.put(file, content_type='audio/mpeg')
-
-
-@app.route('/locate', methods=['GET', 'POST'])
-def locate():
-    msg = None
-    if request.method == 'POST':
-        file = request.files['file']
-        if file:
-            result, status_code = process_image(file, 1)
-            if status_code == 200 and len(result) == 1:
-                return make_response(jsonify(result[0]), status_code)
-            else:
-                return make_response(jsonify(result), status_code)
-        else:
-            msg = "No input file to process"
-
-    return render_template('locate.html', message=msg)
-
-
-@app.route('/clear_db', methods=['GET'])
-def clear_db():
-    # Empty the database
-    for o in ReferenceImage.objects:
-        o.delete()
-
-    # Clear the memory cache
-    ref_database = []
-    detectors, extractor, matcher = init_opencv()
-
-    return "Database cleared"
-
-
 # Initialization
 detectors, extractor, matcher = init_opencv()
-db = init_database()
-# clear_db()
+init_database()
 load_db_in_memory()
 
 if __name__ == '__main__':
