@@ -31,7 +31,6 @@ class ReferenceImageListAPI(restful.Resource):
 
         # Clear the memory cache
         dbcache.clear()
-        detectors, extractor, matcher = init_opencv()
+        init_opencv()
 
-        print "Database cleared"
-        pass
+        return {"success": True, "message": "Database cleared"}

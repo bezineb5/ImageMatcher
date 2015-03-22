@@ -1,4 +1,3 @@
-from flask import request
 from flask.ext import restful
 from flask.ext.restful import reqparse
 from engine.matcher import process_image

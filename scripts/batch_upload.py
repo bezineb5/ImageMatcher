@@ -3,13 +3,13 @@ from os.path import isfile, join, basename, splitext
 import sys
 import requests
 
-SERVER_URL = "http://127.0.0.1:5000/"
+SERVER_URL = "http://127.0.0.1:52300/"
 
 
 def upload_files(base_url, files):
-    url = base_url + 'upload'
+    url = base_url + 'api/1.0/references/'
     for f in files:
-        file_upload = {'file': (basename(f), open(f, 'rb'), 'image/*')}
+        file_upload = {'image': (basename(f), open(f, 'rb'), 'image/*')}
         requests.post(url, files=file_upload)
 
 

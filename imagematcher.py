@@ -70,7 +70,7 @@ def upload_file():
 
 
 # Initialization
-#init_opencv()
+init_opencv()
 init_database()
 load_db_in_memory()
 

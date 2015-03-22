@@ -24,7 +24,15 @@ THUMBNAIL_SIZE = 800, 600
 ORB_MAX_FEATURES = 250
 
 
+# Detectors and matchers
+__detectors__ = None
+__extractor__ = None
+__matcher__ = None
+
+
 def init_opencv():
+    global __detectors__, __extractor__, __matcher__
+
     # Initiate SURF detector
     # min_hessian_import = 400
     # min_hessian_match = 400
@@ -61,12 +69,16 @@ def init_opencv():
     # flann = cv2.BFMatcher()
     # flann = indexed_descriptors.Matcher()
 
+    __detectors__ = detectors
+    __extractor__ = extractor
+    __matcher__ = flann
+
     return detectors, extractor, flann
 
 
 def train_matcher(ref_image, descriptors):
     dbcache.add(ref_image)
-    matcher.add([descriptors])
+    __matcher__.add([descriptors])
 
 
 def load_db_in_memory():
@@ -121,7 +133,7 @@ def detectAndComputeDescriptors(img):
     # find the keypoints and descriptors with SURF
     kp = None
     i = 0
-    list_detectors = detectors
+    list_detectors = __detectors__
     if sensitive:
         list_detectors = list_detectors[1:]
 
@@ -132,7 +144,7 @@ def detectAndComputeDescriptors(img):
             print "Exit at " + str(i)
             break
 
-    kp, des = extractor.compute(img, kp)
+    kp, des = __extractor__.compute(img, kp)
 
     print "Number of descriptors: " + str(len(kp))
     return kp, des
@@ -235,7 +247,7 @@ def score_transformation(mat, w_ref, h_ref):
 
 @timeit
 def match_images(kp_img, des_img, max_number_of_matches, min_score=0.0):
-    matches = matcher.knnMatch(des_img, k=2)
+    matches = __matcher__.knnMatch(des_img, k=2)
 
     # Filter matches which are more than 3 times further than the min
     #print matches
@@ -338,4 +350,4 @@ def process_image(file, max_number_of_results, min_score=0.0):
 
 
 # Initialization
-detectors, extractor, matcher = init_opencv()
+#detectors, extractor, matcher = init_opencv()
