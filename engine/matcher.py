@@ -47,7 +47,7 @@ def init_opencv():
     # detectors = [cv2.SURF(5000, 4, 2, False), extractor, cv2.SURF(400, 4, 2, False)]
 
     # ORB detector
-    extractor = cv2.ORB(ORB_MAX_FEATURES)
+    extractor = cv2.ORB_create(ORB_MAX_FEATURES)
     detectors = [extractor, extractor]
 
     # FLANN parameters
